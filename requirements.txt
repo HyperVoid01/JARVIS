@@ -1,0 +1,13 @@
+# Wake word detection ("Hey Jarvis") - small ONNX models, runs on CPU
+openwakeword==0.6.0
+
+# Speech-to-text - local Whisper via CTranslate2 (much faster than openai-whisper)
+faster-whisper==1.2.1
+
+# Voice activity detection - decides when you've stopped talking
+webrtcvad-wheels==2.0.14.post1
+
+# Microphone + speaker access (PortAudio, wheels bundle it on Windows/macOS)
+sounddevice==0.5.6
+
+numpy>=1.24
