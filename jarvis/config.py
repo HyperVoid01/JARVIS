@@ -29,20 +29,36 @@ class Config:
     # --- Command recording (VAD endpointing) ------------------------------
     vad_aggressiveness: int = 2      # 0 (lenient) .. 3 (strict) speech detection
     start_timeout_s: float = 5.0     # give up if you don't start talking in time
-    end_silence_s: float = 0.9       # this much silence after speech = you're done
+    end_silence_s: float = 1.3       # this much silence after speech = you're done
     max_command_s: float = 15.0      # hard cap on command length
     min_speech_s: float = 0.25       # ignore blips shorter than this
-    speech_energy_ratio: float = 3.0 # speech must be this many times louder than room noise
-    min_speech_rms: float = 100.0    # absolute loudness floor for speech (int16 RMS)
+    speech_energy_ratio: float = 2.0 # speech must be this many times louder than room noise
+    min_speech_rms: float = 50.0     # absolute loudness floor for speech (int16 RMS)
 
     # --- Speech-to-text ---------------------------------------------------
     whisper_model: str = "small.en"  # tiny.en / base.en / small.en / medium.en / large-v3 / turbo
-    whisper_device: str = "auto"     # auto / cpu / cuda
+    # cpu keeps the GPU free for the LLM (a 4 GB card can't hold both). Use auto/cuda on bigger GPUs.
+    whisper_device: str = "cpu"      # auto / cpu / cuda
     whisper_compute_type: str = "auto"  # auto / int8 / float16 / int8_float16
     language: str | None = "en"      # None = auto-detect (needs a non-.en model)
     beam_size: int = 5
     # Biases Whisper toward words it should expect. Add names you use a lot.
     initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord."
+
+    # --- Brain (LLM via Ollama) -------------------------------------------
+    # Instruct (non-reasoning) model: answers instantly. Plain "qwen3:4b" is a slow thinking model.
+    llm_model: str = "qwen3:4b-instruct-2507-q4_K_M"
+    ollama_url: str = "http://localhost:11434"
+    llm_num_ctx: int = 4096          # context window; bigger uses more VRAM
+    llm_keep_alive: str = "30m"      # keep the model loaded in VRAM between commands
+    history_turns: int = 6           # how many past commands JARVIS remembers for follow-ups
+    history_timeout_s: float = 300.0 # forget the conversation after this long without a command
+    user_name: str = "Sooriyan"
+
+    # --- Tools ------------------------------------------------------------
+    # Folders to search for Unity projects. None = Documents, Desktop, D:\ and a few common spots.
+    unity_project_dirs: list[str] | None = None
+    unity_editor_root: str = "C:/Program Files/Unity/Hub/Editor"
 
     # --- Feedback ---------------------------------------------------------
     chime: bool = True               # play a sound when the wake word is heard
