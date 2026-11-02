@@ -41,11 +41,11 @@ class CommandRecorder:
         self,
         aggressiveness: int = 2,
         start_timeout_s: float = 5.0,
-        end_silence_s: float = 0.9,
+        end_silence_s: float = 1.3,
         max_command_s: float = 15.0,
         min_speech_s: float = 0.25,
-        speech_energy_ratio: float = 3.0,
-        min_speech_rms: float = 100.0,
+        speech_energy_ratio: float = 2.0,
+        min_speech_rms: float = 50.0,
     ):
         self._vad = webrtcvad.Vad(aggressiveness)
         self._start_timeout_chunks = int(start_timeout_s * 1000 / CHUNK_MS)
