@@ -8,7 +8,6 @@ version it was made with.
 
 from __future__ import annotations
 
-import difflib
 import os
 import re
 import subprocess
@@ -16,6 +15,7 @@ import time
 from pathlib import Path
 
 from . import tool
+from .speech_match import best_match
 
 # Where to look for projects. Override with --unity-project-dirs.
 PROJECT_DIRS: list[Path] = [
@@ -84,16 +84,12 @@ def editor_version(project: Path) -> str | None:
 
 
 def _match(name: str, options: list[str]) -> str | None:
-    norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())  # noqa: E731
-    wanted = norm(name)
-    by_norm = {norm(o): o for o in options}
-    if wanted in by_norm:
-        return by_norm[wanted]
-    contains = sorted((k for k in by_norm if wanted and (wanted in k or k in wanted)), key=len)
-    if contains:
-        return by_norm[contains[0]]
-    close = difflib.get_close_matches(wanted, list(by_norm), n=1, cutoff=0.6)
-    return by_norm[close[0]] if close else None
+    return best_match(name, options, cutoff=0.6)
+
+
+def match_project(name: str) -> str | None:
+    """Best-matching project name for what the user said, or None."""
+    return _match(name, list(find_projects()))
 
 
 @tool
@@ -110,7 +106,7 @@ def open_unity_project(name: str) -> str:
     """Open one of the user's Unity projects in the Unity editor.
 
     Args:
-        name: The project name as the user said it, e.g. "Rat Attack".
+        name: The project name exactly as transcribed, even if it looks misspelled (e.g. "Wacer" for "Racer"). Fuzzy matching handles it.
     """
     projects = find_projects()
     match = _match(name, list(projects))

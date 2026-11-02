@@ -15,5 +15,8 @@ numpy>=1.24
 # Exact volume control through Windows Core Audio
 pycaw==20260927; sys_platform == "win32"
 
+# Per-app media control (pause Spotify without touching YouTube) via Windows media sessions
+winrt-Windows.Media.Control[all]>=3.2.1; sys_platform == "win32"
+
 # Talks to the local Ollama server (the LLM "brain")
 requests>=2.31
