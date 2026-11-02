@@ -163,6 +163,13 @@ def main() -> int:
     from jarvis.stt import Transcriber
 
     transcriber = None
+    if not args.no_stt and brain:
+        # Tell Whisper the names it should expect, so "Racer" isn't heard as "Laser".
+        from jarvis.tools import unity
+        names = sorted(unity.find_projects())
+        if names:
+            config.initial_prompt = f"{config.initial_prompt or ''} Unity projects: {', '.join(names)}.".strip()
+            print(f"Whisper primed with {len(names)} Unity project names")
     if not args.no_stt:
         print(f"Loading Whisper '{config.whisper_model}' (first run downloads it)...")
         transcriber = Transcriber(

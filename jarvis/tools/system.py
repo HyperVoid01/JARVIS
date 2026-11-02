@@ -16,6 +16,7 @@ from typing import Literal
 from urllib.parse import quote_plus
 
 from . import notify, tool
+from .speech_match import speech_key
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -148,7 +149,13 @@ def _find_shortcut(wanted: str, exact_only: bool = False) -> Path | None:
         return shortcuts[whole[0]]
 
     close = difflib.get_close_matches(wanted, list(shortcuts), n=1, cutoff=0.8)
-    return shortcuts[close[0]] if close else None
+    if close:
+        return shortcuts[close[0]]
+
+    # Last resort: compare how the names sound ("chwome" -> "chrome").
+    keyed = {speech_key(k): k for k in shortcuts}
+    hit = keyed.get(speech_key(wanted))
+    return shortcuts[hit] if hit else None
 
 
 def _launch(target: str | Path, label: str) -> str:
