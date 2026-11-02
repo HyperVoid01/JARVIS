@@ -17,7 +17,7 @@ A local, offline voice assistant. Built in stages:
         record until you stop talking  (WebRTC VAD + noise-floor gate)
                     │
                     ▼
-        faster-whisper ──► text ──► Brain (Ollama, qwen3:4b)
+        faster-whisper ──► text ──► Brain (Ollama, Qwen3 4B Instruct)
                                       │   ▲
                               tool call   tool result
                                       ▼   │
@@ -56,10 +56,10 @@ pip install -r requirements.txt
 Install [Ollama](https://ollama.com), then pull the model:
 
 ```cmd
-ollama pull qwen3:4b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
-`qwen3:4b` (~2.5 GB) fits fully on a 4 GB GPU. With 8 GB+ VRAM, `qwen3:8b` is smarter: run with `--llm-model qwen3:8b`.
+This is the **instruct** version of Qwen3 4B (~2.5 GB), which fits fully on a 4 GB GPU and answers without a slow "thinking" phase. Avoid plain `qwen3:4b`: it points to the reasoning-only version, which adds seconds to every reply. Any Ollama model with tool support works via `--llm-model`.
 
 ## Run
 

@@ -46,7 +46,8 @@ class Config:
     initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord."
 
     # --- Brain (LLM via Ollama) -------------------------------------------
-    llm_model: str = "qwen3:4b"      # any Ollama model with tool support
+    # Instruct (non-reasoning) model: answers instantly. Plain "qwen3:4b" is a slow thinking model.
+    llm_model: str = "qwen3:4b-instruct-2507-q4_K_M"
     ollama_url: str = "http://localhost:11434"
     llm_num_ctx: int = 4096          # context window; bigger uses more VRAM
     llm_keep_alive: str = "30m"      # keep the model loaded in VRAM between commands

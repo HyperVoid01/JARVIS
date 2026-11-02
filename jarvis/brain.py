@@ -2,10 +2,14 @@
 
 Flow for one command:
     user text -> LLM -> wants a tool? -> run it -> send result back -> LLM -> ...
-                    \-> plain answer -> return it
+                    \\-> plain answer -> return it
 
 Talks to Ollama's HTTP API directly (http://localhost:11434/api/chat), so
 there's no extra SDK to install.
+
+Use an *instruct* (non-reasoning) model. Reasoning models like
+qwen3:4b-thinking spend seconds "thinking" before every reply, which is far
+too slow for voice. If one is used anyway, its reasoning is stripped out.
 """
 
 from __future__ import annotations
@@ -23,7 +27,8 @@ SYSTEM_PROMPT = """You are JARVIS, a voice assistant running on {user}'s Windows
 
 Rules:
 - Your replies are read aloud, so answer in one or two short sentences. No markdown, lists, emojis or code.
-- When the user asks you to do something on the PC, call the matching tool. Never claim you did something unless a tool result confirms it.
+- When the user asks you to do something on the PC, call the matching tool once. Never claim you did something unless a tool result confirms it.
+- After a tool succeeds, just confirm it briefly. Do not call the same tool again.
 - If a tool returns an error, briefly say what went wrong.
 - If a request is unclear or no tool fits, say so in one sentence.
 - Be helpful with a dry, understated wit, like the JARVIS from Iron Man. Address the user as "sir" occasionally, not every time.
@@ -38,7 +43,7 @@ class OllamaError(RuntimeError):
 class Brain:
     def __init__(
         self,
-        model: str = "qwen3:4b",
+        model: str = "qwen3:4b-instruct-2507-q4_K_M",
         url: str = "http://localhost:11434",
         num_ctx: int = 4096,
         keep_alive: str = "30m",
@@ -79,7 +84,8 @@ class Brain:
         wanted = self.model if ":" in self.model else self.model + ":latest"
         if wanted not in names:
             raise OllamaError(
-                f"Model '{self.model}' isn't downloaded. Run: ollama pull {self.model}"
+                f"Model '{self.model}' isn't downloaded. Run: ollama pull {self.model}\n"
+                f"        Installed models: {', '.join(sorted(names)) or 'none'}"
             )
 
     def warm_up(self) -> None:
@@ -102,34 +108,54 @@ class Brain:
         self._history.append({"role": "user", "content": text})
         turn_start = len(self._history) - 1
 
+        # Tool calls already run during this command, so the model can't open Discord twice.
+        done: dict[str, str] = {}
+
         reply = ""
         for _ in range(self.max_tool_rounds + 1):
             message = self._chat()
+            content = _clean(message.get("content", ""))
             calls = message.get("tool_calls") or []
+
+            # Store only the final answer, never leaked reasoning, so it can't snowball.
             self._history.append({
                 "role": "assistant",
-                "content": message.get("content", ""),
+                "content": content,
                 **({"tool_calls": calls} if calls else {}),
             })
 
             if not calls:
-                reply = _clean(message.get("content", ""))
+                reply = content
                 break
 
+            new_calls = 0
             for call in calls:
                 fn = call.get("function", {})
                 name = fn.get("name", "")
                 args = fn.get("arguments", {})
-                result = tools.call(name, args)
-                print(f"[tool] {name}({_fmt_args(args)}) -> {result}")
+                key = f"{name}:{json.dumps(args, sort_keys=True) if isinstance(args, dict) else args}"
+
+                if key in done:
+                    result = f"Already done: {done[key]} Do not repeat it; just reply to the user."
+                    if self.debug:
+                        print(f"[tool] skipped duplicate {name}({_fmt_args(args)})")
+                else:
+                    result = tools.call(name, args)
+                    done[key] = result
+                    new_calls += 1
+                    print(f"[tool] {name}({_fmt_args(args)}) -> {result}")
                 self._history.append({"role": "tool", "content": result, "tool_name": name})
+
+            if new_calls == 0:
+                # Model is only repeating itself. Stop and report what already happened.
+                break
         else:
             reply = "Sorry, I got stuck in a loop on that one."
 
         if not reply:
-            # Model went straight from tool result to silence: fall back to the last tool result.
-            last_tool = next((m for m in reversed(self._history[turn_start:]) if m["role"] == "tool"), None)
-            reply = last_tool["content"] if last_tool else "Done."
+            # No spoken answer: fall back to the last real tool result.
+            reply = next(iter(reversed(list(done.values()))), "") or "Done."
+            self._history.append({"role": "assistant", "content": reply})
 
         self._trim_history()
         return reply
@@ -149,7 +175,7 @@ class Brain:
             "messages": [{"role": "system", "content": system}, *self._history],
             "tools": self._tool_schemas,
             "stream": False,
-            "think": False,  # Qwen3's reasoning mode: far too slow for voice commands
+            "think": False,  # disables reasoning on hybrid models; instruct models ignore it
             "keep_alive": self.keep_alive,
             "options": {"num_ctx": self.num_ctx, "temperature": 0.3},
         }
@@ -158,12 +184,17 @@ class Brain:
             r = requests.post(f"{self.url}/api/chat", json=payload, timeout=120)
         except requests.RequestException as e:
             raise OllamaError(f"Ollama request failed: {e}") from e
+
+        if r.status_code == 400 and "think" in r.text.lower():
+            # Some models reject the think flag entirely; retry without it.
+            payload.pop("think")
+            r = requests.post(f"{self.url}/api/chat", json=payload, timeout=120)
         if r.status_code != 200:
             raise OllamaError(f"Ollama returned {r.status_code}: {r.text[:300]}")
 
         message = r.json().get("message", {})
         if self.debug:
-            print(f"[llm] {time.perf_counter() - start:.2f}s  {json.dumps(message)[:300]}")
+            print(f"[llm] {time.perf_counter() - start:.2f}s  {json.dumps(message)[:400]}")
         return message
 
     def _trim_history(self) -> None:
@@ -174,8 +205,12 @@ class Brain:
 
 
 def _clean(text: str) -> str:
-    """Strip anything that shouldn't be spoken: leftover <think> blocks, markdown, emojis."""
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    """Strip anything that shouldn't be spoken: reasoning, markdown, emojis."""
+    # Thinking models open <think> inside the chat template, so the output often
+    # contains only the closing tag. Everything before the last </think> is reasoning.
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[1]
+    text = re.sub(r"<think>.*?(</think>|$)", "", text, flags=re.DOTALL)
     text = re.sub(r"[*_`#]+", "", text)
     text = re.sub(r"[\U0001F300-\U0001FAFF☀-➿]", "", text)
     return " ".join(text.split())
