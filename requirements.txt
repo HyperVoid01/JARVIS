@@ -11,3 +11,6 @@ webrtcvad-wheels==2.0.14.post1
 sounddevice==0.5.6
 
 numpy>=1.24
+
+# Talks to the local Ollama server (the LLM "brain")
+requests>=2.31

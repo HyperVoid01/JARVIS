@@ -3,11 +3,11 @@
 A local, offline voice assistant. Built in stages:
 
 - [x] **Stage 1: Ears.** Wake word ("Hey Jarvis") → record command → speech-to-text
-- [ ] Stage 2: Brain. LLM (Ollama) with tool calling
+- [x] **Stage 2: Brain.** Local LLM (Ollama) with tool calling: opens apps, Unity projects, timers, media keys
 - [ ] Stage 3: Voice. Text-to-speech replies (Piper)
 - [ ] Stage 4: Memory + HUD
 
-## How Stage 1 works
+## How it works
 
 ```
  mic ──► 80 ms chunks ──► openWakeWord ("hey_jarvis") ──► chime
@@ -17,7 +17,11 @@ A local, offline voice assistant. Built in stages:
         record until you stop talking  (WebRTC VAD + noise-floor gate)
                     │
                     ▼
-        faster-whisper ──► text ──► on_command()  ◄── Stage 2 plugs in here
+        faster-whisper ──► text ──► Brain (Ollama, qwen3:4b)
+                                      │   ▲
+                              tool call   tool result
+                                      ▼   │
+                                    jarvis/tools/*  ──► reply  ◄── Stage 3 speaks this
 ```
 
 | File | Job |
@@ -27,44 +31,96 @@ A local, offline voice assistant. Built in stages:
 | `jarvis/audio.py` | Microphone input, plus WAV-file input for testing |
 | `jarvis/wakeword.py` | openWakeWord wrapper |
 | `jarvis/recorder.py` | Detects when you start and stop talking |
-| `jarvis/stt.py` | faster-whisper wrapper (auto GPU → CPU fallback) |
+| `jarvis/stt.py` | faster-whisper wrapper |
 | `jarvis/pipeline.py` | The listen → record → transcribe loop |
+| `jarvis/brain.py` | Ollama chat + tool-calling loop, short conversation memory |
+| `jarvis/tools/__init__.py` | `@tool` decorator: turns a Python function into something the LLM can call |
+| `jarvis/tools/system.py` | Time, apps, websites, web search, media keys, timers |
+| `jarvis/tools/unity.py` | Find Unity projects and open them in the right editor version |
 | `jarvis/sounds.py` | Chimes generated in code |
 
 Everything runs locally. No API keys and no audio leaves your PC.
 
 ## Setup (Windows)
 
-Use **Python 3.12** (3.10–3.13 work). On Linux use 3.11, because openWakeWord pulls in `tflite-runtime` there.
+Use Python **3.10–3.13**. On Linux use 3.10 or 3.11, because openWakeWord pulls in `tflite-runtime` there.
 
-```powershell
+```cmd
 cd JARVIS
-py -3.12 -m venv .venv
-.venv\Scripts\activate
+py -3.10 -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Or with uv: `uv venv -p 3.12` then `uv pip install -r requirements.txt`.
+Install [Ollama](https://ollama.com), then pull the model:
+
+```cmd
+ollama pull qwen3:4b
+```
+
+`qwen3:4b` (~2.5 GB) fits fully on a 4 GB GPU. With 8 GB+ VRAM, `qwen3:8b` is smarter: run with `--llm-model qwen3:8b`.
 
 ## Run
 
-```powershell
+```cmd
+python main.py --text             # type commands - quickest way to test the brain
+python main.py                    # voice: say "Hey Jarvis, open Spotify"
 python main.py --list-devices     # find your mic's number
-python main.py                    # default mic
 python main.py --input-device 3   # specific mic
+python main.py --no-brain         # voice -> text only (Stage 1 behaviour)
 ```
 
 The first run downloads the wake word model (~3 MB) and Whisper `small.en` (~490 MB). After that it works offline.
 
-Say **"Hey Jarvis"**, wait for the chime, then speak. You can also say it in one breath: *"Hey Jarvis, open Spotify."*
-
 ```
-[wake] heard "hey_jarvis" (score 0.91)
+[wake] heard "hey_jarvis" (score 0.93)
 [rec] recording...
 [rec] got 2.1s of audio
 [stt] transcribing...
->> "Open Spotify."   (2.1s audio, transcribed in 0.84s)
+>> "Open Spotify."   (2.1s audio, transcribed in 1.40s)
+[tool] open_app(name='Spotify') -> Opened Spotify.
+JARVIS: Spotify is open, sir.
 ```
+
+## What it can do
+
+| Say | Tool |
+|---|---|
+| "What time is it?" / "What's the date?" | `get_datetime` |
+| "Open Spotify / Discord / VS Code / Unity Hub" | `open_app` (searches your Start Menu and Desktop shortcuts) |
+| "Open YouTube" / "Go to github.com" | `open_website` |
+| "Search for Unity NavMesh tutorials" / "Find lofi on YouTube" | `web_search` |
+| "Pause the music" / "Next song" / "Turn the volume up a lot" | `media_control` (keyboard media keys) |
+| "Set a timer for 10 minutes for pizza" / "How long is left?" | `set_timer`, `list_timers` |
+| "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
+
+It remembers the last few commands, so follow-ups like "now make it 5 minutes" work. The memory resets after 5 minutes of silence.
+
+### Unity projects
+
+JARVIS looks for folders containing `Assets/` and `ProjectSettings/ProjectVersion.txt` in Documents, Desktop, `~/Unity Projects`, `Documents/GitHub` and `D:\`, up to 3 folders deep. It opens each project with the editor version it was made in, from `C:\Program Files\Unity\Hub\Editor`. If your projects live elsewhere:
+
+```cmd
+python main.py --unity-project-dirs "D:\Unity" "E:\School\Projects"
+```
+
+### Adding your own tool
+
+Write a function with type hints and a docstring in any file under `jarvis/tools/`, and add `@tool`:
+
+```python
+@tool
+def lock_pc() -> str:
+    """Lock the Windows session."""
+    import ctypes
+    ctypes.windll.user32.LockWorkStation()
+    return "Locked."
+```
+
+The docstring is what the LLM reads to decide when to use it, so keep it short and specific. For a new file, import it at the bottom of `jarvis/tools/__init__.py`. Small models get less reliable as the tool list grows, so prefer a few general tools over many narrow ones.
+
+App names that don't match their Start Menu shortcut can be added to `APP_ALIASES` in `jarvis/tools/system.py`.
 
 ## Tuning
 
@@ -77,29 +133,29 @@ Every setting in `jarvis/config.py` is also a flag, e.g. `--wake-threshold 0.6`.
 | Cuts you off mid-sentence | `--end-silence-s 1.8`, or lower `--min-speech-rms` (try 30) |
 | Keeps recording after you stop (noisy room) | `--speech-energy-ratio 3` or `--vad-aggressiveness 3` |
 | Doesn't notice you started talking (quiet mic) | `--min-speech-rms 30` and/or `--speech-energy-ratio 1.5` |
-| Transcription too slow | `--whisper-model base.en`, or use an NVIDIA GPU (below) |
-| Transcription inaccurate | `--whisper-model medium.en` or `turbo`; add names to `initial_prompt` in config |
+| Transcription too slow | `--whisper-model base.en` |
+| Transcription inaccurate | `--whisper-model medium.en`; add names to `initial_prompt` in config |
+| LLM replies slow | Check `ollama ps` shows `100% GPU`. If not, close GPU-heavy apps or lower `--llm-num-ctx 2048` |
+| LLM picks the wrong tool | `--debug` shows its raw replies; tighten that tool's docstring, or try a bigger model |
 
 ### Testing without talking
 
-Record yourself once with `--save-recordings`, or use any 16-bit WAV, then replay it:
-
-```powershell
-python main.py --file test.wav            # as fast as possible
-python main.py --file test.wav --realtime # real speed, with chimes
+```cmd
+python main.py --text                     # type commands straight into the brain
+python main.py --file test.wav            # replay a recording (make one with --save-recordings)
 python main.py --no-stt --debug           # tune wake word / VAD without loading Whisper
 ```
 
-### NVIDIA GPU (optional)
+### GPU usage
 
-`whisper_device` defaults to `auto`: it tries CUDA and falls back to CPU if that fails, so it is safe on any PC. To actually use the GPU, faster-whisper needs the CUDA 12 cuBLAS and cuDNN 9 DLLs on your PATH. See the "GPU" section of the [faster-whisper README](https://github.com/SYSTRAN/faster-whisper#gpu) for the Windows download. The startup line `Whisper ready on cuda/float16` confirms it worked.
-
-On a GPU, `turbo` or `medium.en` is fast enough for real-time use.
+On a 4 GB card the GPU goes to the LLM and Whisper runs on the CPU (`whisper_device = "cpu"`), which takes about 1.5 s per command with `small.en`. With 8 GB+ VRAM you can move Whisper to the GPU with `--whisper-device cuda`. That needs the CUDA 12 cuBLAS and cuDNN 9 DLLs on your PATH; see the "GPU" section of the [faster-whisper README](https://github.com/SYSTRAN/faster-whisper#gpu).
 
 ## Custom wake word
 
 openWakeWord can train a model for any phrase (e.g. just "Jarvis", or "Hey Sierra") using its Colab notebook, with no recordings needed. Drop the resulting `.onnx` file in the project and run:
 
-```powershell
+```cmd
 python main.py --wake-model models/my_wake_word.onnx
 ```
+
+Note: openWakeWord's pre-trained models (including `hey_jarvis`) are licensed for non-commercial use.

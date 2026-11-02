@@ -37,12 +37,27 @@ class Config:
 
     # --- Speech-to-text ---------------------------------------------------
     whisper_model: str = "small.en"  # tiny.en / base.en / small.en / medium.en / large-v3 / turbo
-    whisper_device: str = "auto"     # auto / cpu / cuda
+    # cpu keeps the GPU free for the LLM (a 4 GB card can't hold both). Use auto/cuda on bigger GPUs.
+    whisper_device: str = "cpu"      # auto / cpu / cuda
     whisper_compute_type: str = "auto"  # auto / int8 / float16 / int8_float16
     language: str | None = "en"      # None = auto-detect (needs a non-.en model)
     beam_size: int = 5
     # Biases Whisper toward words it should expect. Add names you use a lot.
     initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord."
+
+    # --- Brain (LLM via Ollama) -------------------------------------------
+    llm_model: str = "qwen3:4b"      # any Ollama model with tool support
+    ollama_url: str = "http://localhost:11434"
+    llm_num_ctx: int = 4096          # context window; bigger uses more VRAM
+    llm_keep_alive: str = "30m"      # keep the model loaded in VRAM between commands
+    history_turns: int = 6           # how many past commands JARVIS remembers for follow-ups
+    history_timeout_s: float = 300.0 # forget the conversation after this long without a command
+    user_name: str = "Sooriyan"
+
+    # --- Tools ------------------------------------------------------------
+    # Folders to search for Unity projects. None = Documents, Desktop, D:\ and a few common spots.
+    unity_project_dirs: list[str] | None = None
+    unity_editor_root: str = "C:/Program Files/Unity/Hub/Editor"
 
     # --- Feedback ---------------------------------------------------------
     chime: bool = True               # play a sound when the wake word is heard
