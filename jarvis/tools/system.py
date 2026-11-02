@@ -1,4 +1,4 @@
-"""Everyday PC tools: time, apps, websites, volume, media keys, timers."""
+"""Everyday PC tools: time, apps, websites, timers. (Volume and media live in media.py.)"""
 
 from __future__ import annotations
 
@@ -229,85 +229,6 @@ def web_search(query: str, site: Literal["google", "youtube"] = "google") -> str
         url = "https://www.google.com/search?q=" + quote_plus(query)
     webbrowser.open(url)
     return f"Showing {site} results for '{query}' in the browser."
-
-
-# --- Volume ----------------------------------------------------------------
-
-def _speakers():
-    """The default output device's volume control (Windows Core Audio via pycaw)."""
-    from pycaw.pycaw import AudioUtilities
-    return AudioUtilities.GetSpeakers().EndpointVolume
-
-
-@tool
-def set_volume(percent: int = -1) -> str:
-    """Set the system volume to an exact percentage, or check the current volume.
-
-    Args:
-        percent: Target volume from 0 to 100. Leave it out to just report the current volume.
-    """
-    if not IS_WINDOWS:
-        return "Error: volume control is only supported on Windows."
-    try:
-        vol = _speakers()
-    except Exception as e:
-        return f"Error: couldn't access the speakers: {e}"
-
-    if percent is None or int(percent) < 0:
-        current = round(vol.GetMasterVolumeLevelScalar() * 100)
-        muted = " (muted)" if vol.GetMute() else ""
-        return f"Volume is at {current}%{muted}."
-
-    percent = max(0, min(100, int(percent)))
-    vol.SetMasterVolumeLevelScalar(percent / 100, None)
-    if percent > 0:
-        vol.SetMute(0, None)
-    return f"Volume set to {percent}%."
-
-
-# --- Media keys ------------------------------------------------------------
-
-_MEDIA_KEYS = {
-    "play_pause": 0xB3,
-    "next": 0xB0,
-    "previous": 0xB1,
-    "volume_up": 0xAF,
-    "volume_down": 0xAE,
-    "mute": 0xAD,
-}
-
-
-@tool
-def media_control(
-    action: Literal["play_pause", "next", "previous", "volume_up", "volume_down", "mute"],
-    times: int = 1,
-) -> str:
-    """Play/pause, skip tracks, mute, or nudge the volume up or down a little. For an exact volume level use set_volume instead.
-
-    Args:
-        action: play_pause, next, previous, volume_up, volume_down or mute (mute toggles).
-        times: How many presses. Each volume press is 2%, so "a bit" is about 3 and "a lot" about 10.
-    """
-    if not IS_WINDOWS:
-        return "Error: media keys are only supported on Windows."
-    import ctypes
-
-    vk = _MEDIA_KEYS[action]
-    times = max(1, min(int(times), 50))
-    KEYUP = 0x0002
-    for _ in range(times):
-        ctypes.windll.user32.keybd_event(vk, 0, 0, 0)  # type: ignore[attr-defined]
-        ctypes.windll.user32.keybd_event(vk, 0, KEYUP, 0)  # type: ignore[attr-defined]
-        time.sleep(0.02)
-
-    result = f"Pressed {action.replace('_', ' ')}" + (f" {times} times." if times > 1 else ".")
-    if action.startswith("volume") or action == "mute":
-        try:
-            time.sleep(0.05)
-            result += " " + set_volume()  # report the resulting level
-        except Exception:
-            pass
-    return result
 
 
 # --- Timers ----------------------------------------------------------------

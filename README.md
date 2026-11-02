@@ -35,7 +35,8 @@ A local, offline voice assistant. Built in stages:
 | `jarvis/pipeline.py` | The listen → record → transcribe loop |
 | `jarvis/brain.py` | Ollama chat + tool-calling loop, short conversation memory |
 | `jarvis/tools/__init__.py` | `@tool` decorator: turns a Python function into something the LLM can call |
-| `jarvis/tools/system.py` | Time, apps, websites, web search, media keys, timers |
+| `jarvis/tools/system.py` | Time, apps, websites, web search, timers |
+| `jarvis/tools/media.py` | Per-app playback control and system volume |
 | `jarvis/tools/unity.py` | Find Unity projects and open them in the right editor version |
 | `jarvis/sounds.py` | Chimes generated in code |
 
@@ -91,8 +92,8 @@ JARVIS: Spotify is open, sir.
 | "Open Spotify / Discord / VS Code / Settings / Bluetooth settings" | `open_app` (Start Menu + Desktop shortcuts, built-in Windows apps) |
 | "Open YouTube" / "Go to github.com" | `open_website` |
 | "Search for Unity NavMesh tutorials" / "Find lofi on YouTube" | `web_search` |
-| "Set the volume to 50%" / "What's the volume?" | `set_volume` (exact level via Windows Core Audio) |
-| "Pause the music" / "Next song" / "Turn it up a bit" | `media_control` (keyboard media keys) |
+| "Set the volume to 50%" / "Turn it up a bit" / "Mute" / "What's the volume?" | `volume` (Windows Core Audio) |
+| "Pause Spotify" / "Next song" / "Resume YouTube" / "What's playing?" | `media_control` (per-app, via Windows media sessions) |
 | "Set a timer for 10 minutes for pizza" / "How long is left?" | `set_timer`, `list_timers` |
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
 
