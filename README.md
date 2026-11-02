@@ -74,9 +74,9 @@ Every setting in `jarvis/config.py` is also a flag, e.g. `--wake-threshold 0.6`.
 |---|---|
 | Triggers when nobody said "Hey Jarvis" | `--wake-threshold 0.6` or higher, or `--wake-vad-threshold 0.5` |
 | Doesn't respond to you | `--debug` to watch scores, then lower `--wake-threshold` (try 0.35) |
-| Cuts you off mid-sentence | `--end-silence-s 1.3` |
-| Keeps recording after you stop (noisy room) | `--speech-energy-ratio 4` or `--vad-aggressiveness 3` |
-| Doesn't notice you started talking (quiet mic) | `--min-speech-rms 50` and/or `--speech-energy-ratio 2` |
+| Cuts you off mid-sentence | `--end-silence-s 1.8`, or lower `--min-speech-rms` (try 30) |
+| Keeps recording after you stop (noisy room) | `--speech-energy-ratio 3` or `--vad-aggressiveness 3` |
+| Doesn't notice you started talking (quiet mic) | `--min-speech-rms 30` and/or `--speech-energy-ratio 1.5` |
 | Transcription too slow | `--whisper-model base.en`, or use an NVIDIA GPU (below) |
 | Transcription inaccurate | `--whisper-model medium.en` or `turbo`; add names to `initial_prompt` in config |
 

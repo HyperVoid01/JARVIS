@@ -29,11 +29,11 @@ class Config:
     # --- Command recording (VAD endpointing) ------------------------------
     vad_aggressiveness: int = 2      # 0 (lenient) .. 3 (strict) speech detection
     start_timeout_s: float = 5.0     # give up if you don't start talking in time
-    end_silence_s: float = 0.9       # this much silence after speech = you're done
+    end_silence_s: float = 1.3       # this much silence after speech = you're done
     max_command_s: float = 15.0      # hard cap on command length
     min_speech_s: float = 0.25       # ignore blips shorter than this
-    speech_energy_ratio: float = 3.0 # speech must be this many times louder than room noise
-    min_speech_rms: float = 100.0    # absolute loudness floor for speech (int16 RMS)
+    speech_energy_ratio: float = 2.0 # speech must be this many times louder than room noise
+    min_speech_rms: float = 50.0     # absolute loudness floor for speech (int16 RMS)
 
     # --- Speech-to-text ---------------------------------------------------
     whisper_model: str = "small.en"  # tiny.en / base.en / small.en / medium.en / large-v3 / turbo
