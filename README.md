@@ -88,10 +88,11 @@ JARVIS: Spotify is open, sir.
 | Say | Tool |
 |---|---|
 | "What time is it?" / "What's the date?" | `get_datetime` |
-| "Open Spotify / Discord / VS Code / Unity Hub" | `open_app` (searches your Start Menu and Desktop shortcuts) |
+| "Open Spotify / Discord / VS Code / Settings / Bluetooth settings" | `open_app` (Start Menu + Desktop shortcuts, built-in Windows apps) |
 | "Open YouTube" / "Go to github.com" | `open_website` |
 | "Search for Unity NavMesh tutorials" / "Find lofi on YouTube" | `web_search` |
-| "Pause the music" / "Next song" / "Turn the volume up a lot" | `media_control` (keyboard media keys) |
+| "Set the volume to 50%" / "What's the volume?" | `set_volume` (exact level via Windows Core Audio) |
+| "Pause the music" / "Next song" / "Turn it up a bit" | `media_control` (keyboard media keys) |
 | "Set a timer for 10 minutes for pizza" / "How long is left?" | `set_timer`, `list_timers` |
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
 
