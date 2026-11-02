@@ -31,10 +31,13 @@ Rules:
 - After a tool succeeds, just confirm it briefly. Do not call the same tool again.
 - If a tool returns an error, repeat its reason briefly. Don't guess at other causes.
 - If the user repeats a request or asks again after an error, call the tool again. Never answer from an earlier result.
+- Your input comes from speech-to-text and names are often misheard ("Eraser" or "Wacer" for "Racer"). If the user asks to open something, ALWAYS call a tool with the name as heard; the tools match names by sound. Never say something doesn't exist without a tool result saying so.
+- If the user asks to open something that sounds like one of their Unity projects (listed below), use open_unity_project. Otherwise use open_app.
+- Users often add a description after a name ("Racer, as in the Formula 1 game"). Use only the name itself, or pick the project that fits the description.
 - If a request is unclear or no tool fits, say so in one sentence.
 - Be helpful with a dry, understated wit, like the JARVIS from Iron Man. Address the user as "sir" occasionally, not every time.
 
-Current date and time: {now}."""
+Current date and time: {now}.{extra}"""
 
 
 class OllamaError(RuntimeError):
@@ -52,6 +55,7 @@ class Brain:
         history_timeout_s: float = 300,
         max_tool_rounds: int = 4,
         user_name: str = "the user",
+        extra_context=None,
         debug: bool = False,
     ):
         self.model = model
@@ -62,6 +66,8 @@ class Brain:
         self.history_timeout_s = history_timeout_s
         self.max_tool_rounds = max_tool_rounds
         self.user_name = user_name
+        # Optional callable returning extra facts for the system prompt (e.g. project names).
+        self.extra_context = extra_context
         self.debug = debug
 
         self._history: list[dict] = []
@@ -167,9 +173,16 @@ class Brain:
     # --- Internals -----------------------------------------------------
 
     def _chat(self) -> dict:
+        extra = ""
+        if self.extra_context:
+            try:
+                extra = "\n" + self.extra_context()
+            except Exception:
+                pass
         system = SYSTEM_PROMPT.format(
             user=self.user_name,
             now=dt.datetime.now().strftime("%A %d %B %Y, %H:%M"),
+            extra=extra,
         )
         payload = {
             "model": self.model,

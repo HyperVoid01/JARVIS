@@ -16,7 +16,7 @@ from typing import Literal
 from urllib.parse import quote_plus
 
 from . import notify, tool
-from .speech_match import speech_key
+from .speech_match import clean_name, speech_key
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -178,7 +178,7 @@ def open_app(name: str) -> str:
     if not IS_WINDOWS:
         return "Error: opening apps is only supported on Windows."
 
-    spoken = _normalise(name)
+    spoken = _normalise(clean_name(name, project=False))
     target = _normalise(APP_ALIASES.get(spoken, spoken))
 
     # 1. A shortcut with exactly this name (respects what's actually installed).
@@ -201,7 +201,13 @@ def open_app(name: str) -> str:
     if exe:
         return _launch(exe, name)
 
-    return f"Error: couldn't find an app called '{name}' on this PC."
+    # 5. Maybe it's a Unity project the model sent to the wrong tool ("open Wacer").
+    from . import unity
+    project = unity.match_project(name)
+    if project:
+        return unity.open_unity_project(project)
+
+    return f"Error: couldn't find an app or Unity project called '{name}' on this PC."
 
 
 # --- Web -------------------------------------------------------------------

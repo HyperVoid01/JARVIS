@@ -82,6 +82,7 @@ def build_brain(config: Config, debug: bool):
         history_turns=config.history_turns,
         history_timeout_s=config.history_timeout_s,
         user_name=config.user_name,
+        extra_context=lambda: "The user's Unity projects: " + (", ".join(sorted(unity.find_projects())) or "none found") + ".",
         debug=debug,
     )
     print(f"Connecting to Ollama ({config.llm_model})...")

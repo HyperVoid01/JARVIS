@@ -87,6 +87,11 @@ def _match(name: str, options: list[str]) -> str | None:
     return best_match(name, options, cutoff=0.6)
 
 
+def match_project(name: str) -> str | None:
+    """Best-matching project name for what the user said, or None."""
+    return _match(name, list(find_projects()))
+
+
 @tool
 def list_unity_projects() -> str:
     """List the Unity projects on this PC with their editor versions."""

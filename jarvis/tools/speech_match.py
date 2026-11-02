@@ -25,12 +25,26 @@ def speech_key(s: str) -> str:
     return s
 
 
+def clean_name(spoken: str, project: bool = True) -> str:
+    """Strip descriptions and filler: "Reaser as in Formula 1 in Unity" -> "Reaser".
+
+    With project=False (app names) words like "Unity" are kept, so "Unity Hub" survives.
+    """
+    s = re.sub(r"\b(as in|like the|like|which is|that's|the one)\b.*$", "", spoken, flags=re.IGNORECASE)
+    if project:
+        s = re.sub(r"\b(in|on|with|using) unity\b", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\b(my|the|unity|project|game|please)\b", "", s, flags=re.IGNORECASE)
+    s = " ".join(s.strip(" .,!?").split())
+    return s or spoken.strip()
+
+
 def best_match(name: str, options: list[str], cutoff: float = 0.6) -> str | None:
     """Pick the option the user most likely meant, or None.
 
     Tries exact and partial matches on spelling, then on sound, and only
     then falls back to fuzzy matching on sound.
     """
+    name = clean_name(name)
     for key in (plain, speech_key):
         wanted = key(name)
         if not wanted:
