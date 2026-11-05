@@ -179,6 +179,8 @@ Every setting in `jarvis/config.py` is also a flag, e.g. `--wake-threshold 0.6`.
 | Interrupts itself while talking | `--barge-in-threshold 0.85`, or `--no-barge-in` to turn interrupting off |
 | Hard to interrupt | `--barge-in-threshold 0.6`, or turn the speakers down / use headphones |
 | Reacts to the end of its own reply | `--echo-tail-s 0.8` |
+| Music too loud / too quiet while it listens | `--duck-level 0.1` (quieter) or `0.4` (louder); `--no-duck` turns it off |
+| An app stayed quiet after closing JARVIS | It was force-closed mid-command; raise the app again in Windows' Volume Mixer |
 | Talks too fast / slow | `--tts-speed 0.9` (slower) or `1.2` (faster) |
 | No sound from the voice | `--list-devices`, then `--output-device N`; test with `--say "test"` |
 | Cuts you off mid-sentence | `--end-silence-s 1.8`, or lower `--min-speech-rms` (try 30) |

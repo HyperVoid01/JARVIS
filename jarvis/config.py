@@ -72,6 +72,11 @@ class Config:
     barge_in_threshold: float = 0.7
     echo_tail_s: float = 0.4         # keep ignoring the mic this long after it stops talking
 
+    # --- Ducking ----------------------------------------------------------
+    # Turn other apps (Spotify, YouTube...) down from the wake word until the reply ends.
+    duck: bool = True
+    duck_level: float = 0.2          # fraction of each app's own volume to keep (0 = silent)
+
     # --- Tools ------------------------------------------------------------
     # Folders to search for Unity projects. None = Documents, Desktop, D:\ and a few common spots.
     unity_project_dirs: list[str] | None = None

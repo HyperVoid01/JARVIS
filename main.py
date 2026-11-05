@@ -256,7 +256,15 @@ def run_voice_mode(config: Config, args, respond, speaker) -> int:
         if respond:
             respond(text)
 
-    pipeline = VoicePipeline(config, source, transcriber, speaker=speaker, debug=args.debug)
+    ducker = None
+    if config.duck:
+        from jarvis.ducking import Ducker
+        ducker = Ducker(level=config.duck_level)
+        if not ducker.available:
+            ducker = None
+
+    pipeline = VoicePipeline(config, source, transcriber, speaker=speaker, ducker=ducker,
+                             debug=args.debug)
     try:
         pipeline.run(on_command)
         if speaker:
