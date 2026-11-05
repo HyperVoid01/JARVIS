@@ -7,6 +7,9 @@ faster-whisper==1.2.1
 # Voice activity detection - decides when you've stopped talking
 webrtcvad-wheels==2.0.14.post1
 
+# Text-to-speech - local neural voices, runs on CPU (voice files download on first run)
+piper-tts==1.8.0
+
 # Microphone + speaker access (PortAudio, wheels bundle it on Windows/macOS)
 sounddevice==0.5.6
 

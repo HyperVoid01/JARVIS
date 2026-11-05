@@ -55,6 +55,23 @@ class Config:
     history_timeout_s: float = 300.0 # forget the conversation after this long without a command
     user_name: str = "Sooriyan"
 
+    # --- Voice (text-to-speech via Piper) ---------------------------------
+    tts: bool = True                 # speak replies out loud (--no-tts to only print them)
+    # Any voice from https://rhasspy.github.io/piper-samples/ (downloaded on first use),
+    # or a path to a .onnx voice file. en_US-ryan-high is a crisper version of the same voice.
+    tts_voice: str = "en_US-danny-low"
+    tts_voice_dir: str = "models/voices"
+    tts_speed: float = 1.1           # 1.2 = 20% faster
+    tts_volume: float = 1.0          # loudness of the voice relative to system volume
+    tts_expressiveness: float = 1.2  # intonation variety: 1 = voice default, higher = livelier (wobbly past ~1.6)
+    tts_effect: float = 2.5          # JARVIS processing (EQ, doubling, room): 0 = off, 1.5 = stronger
+    output_device: int | str | None = None  # None = system default speakers
+    # Say "Hey Jarvis" while it's talking to cut it off. The higher threshold stops
+    # its own voice (picked up by the mic) from triggering it.
+    barge_in: bool = True
+    barge_in_threshold: float = 0.7
+    echo_tail_s: float = 0.4         # keep ignoring the mic this long after it stops talking
+
     # --- Tools ------------------------------------------------------------
     # Folders to search for Unity projects. None = Documents, Desktop, D:\ and a few common spots.
     unity_project_dirs: list[str] | None = None
