@@ -7,7 +7,7 @@
     python main.py --say "Hello, sir."     # test the voice and exit
     python main.py --install-startup       # start JARVIS automatically when you log in
     python main.py --uninstall-startup     # stop doing that
-    python main.py --list-devices          # find your mic's / speakers' index
+    python main.py --list-devices          # list your microphones and speakers
     python main.py --input-device 3        # use a specific mic
     python main.py --llm-model qwen3:8b    # try a different Ollama model
     python main.py --file test.wav         # run a recording through the pipeline
@@ -291,14 +291,52 @@ def run_text_mode(respond, speaker) -> None:
             respond(text)
 
 
+def list_devices() -> None:
+    import sounddevice as sd
+
+    from jarvis.tools import devices
+
+    mics = devices.input_devices()
+    saved = devices.load_settings().get("microphone")
+    print("Microphones:")
+    for d in mics:
+        mark = "  <- saved choice" if saved and devices._same(d["name"], saved) else ""
+        print(f"  {d['index']:>3}  {d['name']}{mark}")
+    print(f"Windows default mic: {devices.device_name(None)}")
+
+    print("\nSpeakers:")
+    seen = set()
+    for i, d in enumerate(sd.query_devices()):
+        name = d["name"].strip()
+        if d["max_output_channels"] > 0 and name.lower() not in seen:
+            seen.add(name.lower())
+            print(f"  {i:>3}  {name}")
+
+    print("\nSay \"Hey Jarvis, switch to my headset\" to change mic (it's remembered),")
+    print("or pass --input-device N (mic) / --output-device N (speakers) for one run.")
+
+
+def pick_microphone(config: Config) -> int | str | None:
+    """--input-device wins; otherwise the mic saved last time; otherwise the Windows default."""
+    if config.input_device is not None:
+        return config.input_device
+
+    from jarvis.tools import devices
+
+    saved = devices.load_settings().get("microphone")
+    if not saved:
+        return None
+    index = devices.find_device(saved)
+    if index is None:
+        print(f"[audio] saved mic '{saved}' isn't connected; using the Windows default")
+    return index
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
     if args.list_devices:
-        import sounddevice as sd
-        print(sd.query_devices())
-        print("\n'>' marks the default mic, '<' the default speakers.")
-        print("Pass a number with --input-device N (mic) or --output-device N (speakers).")
+        list_devices()
         return 0
     if args.install_startup:
         return install_startup()
@@ -385,7 +423,17 @@ def run_voice_mode(config: Config, args, respond, speaker, hud=None) -> int:
         if not args.realtime:
             config.chime = False  # chimes would overlap when running faster than real time
     else:
-        source = MicStream(device=config.input_device)
+        from jarvis.tools import devices
+        mic = pick_microphone(config)
+        try:
+            source = MicStream(device=mic)
+        except Exception as e:
+            if mic is None:
+                raise
+            print(f"[audio] couldn't open {devices.device_name(mic)} ({e}); using the Windows default")
+            source = MicStream(device=None)
+        devices.set_stream(source)  # lets the microphone tool switch it live
+        print(f"Microphone: {devices.device_name(source.device)}")
 
     def on_command(text: str, transcript) -> None:
         if transcript is None:

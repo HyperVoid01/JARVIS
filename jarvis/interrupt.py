@@ -12,7 +12,8 @@ playing at every moment (Speaker.playback_rms), so:
 while JARVIS talks and you don't. It's measured from the first half-second of
 the first reply (you can't interrupt during that), then follows the loudest
 echo it hears: it rises quickly and falls slowly, so it never under-estimates
-its own voice. It's kept between replies. With headphones there's no echo at
+its own voice. It's kept between replies, and measured again from scratch
+after switching microphones (`relearn`). With headphones there's no echo at
 all and any speech works.
 """
 
@@ -45,6 +46,12 @@ class InterruptDetector:
         self._misses = 0
         self._voiced = 0
         self._recent.clear()
+
+    def relearn(self) -> None:
+        """Forget the echo gain: a different mic hears the speakers at a different level."""
+        self.echo_gain = 0.0
+        self._bootstrap = []
+        self.reset()
 
     def update(self, chunk: np.ndarray, playback_rms: float) -> bool:
         """Feed one mic chunk while JARVIS is talking. True once the user has clearly spoken over it."""

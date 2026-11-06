@@ -5,7 +5,7 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Downloaded / generated models (wake word, Piper voices)
+# Downloaded / generated models
 models/
 *.onnx
 *.tflite
@@ -15,9 +15,8 @@ recordings/
 *.wav
 *.log
 
-# Personal: what you've asked JARVIS to remember
-memory.json
-memory.tmp
+# Per-PC settings saved by JARVIS (chosen microphone, etc.)
+user_settings.json
 
 # Editors / OS
 .vscode/

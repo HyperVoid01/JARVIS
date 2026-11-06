@@ -18,7 +18,9 @@ CHUNK_MS = CHUNK_SAMPLES * 1000 // SAMPLE_RATE  # 80
 @dataclass
 class Config:
     # --- Microphone -------------------------------------------------------
-    input_device: int | str | None = None  # None = system default mic
+    # None = the mic you last switched to by voice (saved in user_settings.json),
+    # or the Windows default. A number or name here overrides that for one run.
+    input_device: int | str | None = None
 
     # --- Wake word --------------------------------------------------------
     wake_model: str = "hey_jarvis"   # built-in model name, or path to a custom .onnx
@@ -43,7 +45,7 @@ class Config:
     language: str | None = "en"      # None = auto-detect (needs a non-.en model)
     beam_size: int = 5
     # Biases Whisper toward words it should expect. Add names you use a lot.
-    initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord. Set a timer for ten minutes. Cancel the timer. How long is left on the timer?"
+    initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord. Set a timer for ten minutes. Cancel the timer. How long is left on the timer? Switch to my headset microphone."
 
     # --- Brain (LLM via Ollama) -------------------------------------------
     # Instruct (non-reasoning) model: answers instantly. Plain "qwen3:4b" is a slow thinking model.

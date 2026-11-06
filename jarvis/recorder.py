@@ -7,7 +7,8 @@ Decides "speech" vs "silence" with two checks that must both pass:
 WebRTC VAD on its own happily calls fan hum or hiss "speech", which keeps
 the recording going until the max length. The energy check fixes that. The
 background noise level is learned continuously while JARVIS waits for the
-wake word, so it adapts to a quiet bedroom or a noisy lab.
+wake word, so it adapts to a quiet bedroom or a noisy lab. After a reset
+(startup, or switching microphones) it learns quickly for about a second.
 
     waiting for speech --(speech)--> in speech --(silence > end_silence_s)--> done
           |                              |
@@ -30,6 +31,9 @@ from .config import CHUNK_MS, CHUNK_SAMPLES, SAMPLE_RATE
 VAD_FRAME_MS = 20
 VAD_FRAME_SAMPLES = SAMPLE_RATE * VAD_FRAME_MS // 1000
 VAD_FRAMES_PER_CHUNK = CHUNK_SAMPLES // VAD_FRAME_SAMPLES
+
+# How long to learn the noise floor quickly after a reset.
+WARMUP_CHUNKS = int(1200 / CHUNK_MS)  # ~1.2 s
 
 
 def rms(chunk: np.ndarray) -> float:
@@ -54,17 +58,27 @@ class CommandRecorder:
         self._min_speech_chunks = max(1, int(min_speech_s * 1000 / CHUNK_MS))
         self._energy_ratio = speech_energy_ratio
         self._min_rms = min_speech_rms
-        self.noise_floor = min_speech_rms / speech_energy_ratio  # sensible start, adapts quickly
+        self.reset_noise_floor()
 
     # --- Background noise tracking -------------------------------------
+    def reset_noise_floor(self) -> None:
+        """Forget the learned room noise, e.g. after switching to a different mic."""
+        self.noise_floor = self._min_rms / self._energy_ratio  # sensible start
+        self._warmup = WARMUP_CHUNKS
+
     def observe_background(self, chunk: np.ndarray) -> None:
         """Call with every chunk while idle. Tracks the quiet level of the room.
 
         Falls quickly toward quieter chunks and rises slowly, so it follows
         the noise floor without being dragged up by people talking nearby.
+        During warm-up it moves fast in both directions.
         """
         level = rms(chunk)
-        rate = 0.1 if level < self.noise_floor else 0.005
+        if self._warmup > 0:
+            self._warmup -= 1
+            rate = 0.2
+        else:
+            rate = 0.1 if level < self.noise_floor else 0.005
         self.noise_floor += (level - self.noise_floor) * rate
         self.noise_floor = max(self.noise_floor, 1.0)
 

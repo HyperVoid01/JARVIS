@@ -32,13 +32,23 @@ class MicStream:
 
     PortAudio calls `_callback` on its own thread every 80 ms; we push the
     chunk into a queue and the main loop pulls from it with `read()`.
+
+    `switch()` swaps to another microphone while running. `generation` goes
+    up by one on every switch, so the pipeline knows to re-learn the room's
+    noise level for the new mic.
     """
 
     def __init__(self, device: int | str | None = None):
         import sounddevice as sd  # imported here so file mode works without a sound card
 
+        self._sd = sd
         self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=500)  # ~40 s buffer
-        self._stream = sd.InputStream(
+        self.device = device
+        self.generation = 0
+        self._stream = self._open(device)
+
+    def _open(self, device: int | str | None):
+        stream = self._sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype="int16",
@@ -46,7 +56,8 @@ class MicStream:
             device=device,
             callback=self._callback,
         )
-        self._stream.start()
+        stream.start()
+        return stream
 
     def _callback(self, indata, frames, time_info, status):  # runs on the audio thread
         if status:
@@ -55,6 +66,24 @@ class MicStream:
             self._queue.put_nowait(indata[:, 0].copy())
         except queue.Full:
             pass  # main loop has stalled; drop audio rather than block the audio thread
+
+    def switch(self, device: int | str | None) -> None:
+        """Close the current mic and open another. Raises if the new one can't be opened
+        (the old mic is reopened first, so listening carries on either way)."""
+        old = self.device
+        self._close_stream()
+        try:
+            self._stream = self._open(device)
+        except Exception:
+            try:
+                self._stream = self._open(old)
+            except Exception:
+                self._stream = self._open(None)  # last resort: the Windows default mic
+                self.device = None
+            raise
+        self.device = device
+        self.clear()
+        self.generation += 1
 
     def read(self) -> np.ndarray | None:
         # Wait in short slices: a plain blocking get() swallows Ctrl+C on Windows.
@@ -71,9 +100,15 @@ class MicStream:
             except queue.Empty:
                 return
 
+    def _close_stream(self) -> None:
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception:
+            pass  # device was probably unplugged
+
     def close(self) -> None:
-        self._stream.stop()
-        self._stream.close()
+        self._close_stream()
 
 
 class FileStream:

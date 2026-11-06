@@ -118,6 +118,8 @@ class VoicePipeline:
                 debug=debug,
             )
         self._cooldown_chunks = int(config.wake_cooldown_s * 1000 / CHUNK_MS)
+        # MicStream bumps this when the mic is switched; FileStream doesn't have it.
+        self._source_generation = getattr(source, "generation", 0)
 
     def _talking(self) -> bool:
         return self.speaker is not None and self.speaker.recently_speaking(self.config.echo_tail_s)
@@ -210,6 +212,14 @@ class VoicePipeline:
 
     def _reset(self) -> int:
         """Start fresh after a command. Returns the cooldown in chunks."""
+        # The command may have switched microphones: the new one hears the room
+        # and the speakers at different levels, so learn both again.
+        generation = getattr(self.source, "generation", 0)
+        if generation != self._source_generation:
+            self._source_generation = generation
+            self.recorder.reset_noise_floor()
+            if self.interrupter:
+                self.interrupter.relearn()
         # Drop audio that queued up while we were busy, and clear the wake
         # model's buffer so it can't re-trigger on old audio.
         self.source.clear()
