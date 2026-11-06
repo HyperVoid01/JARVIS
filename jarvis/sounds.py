@@ -20,6 +20,7 @@ def _tone(freqs: list[float], note_s: float = 0.07, volume: float = 0.25) -> np.
 WAKE = _tone([660, 990])        # rising: "I'm listening"
 DONE = _tone([990, 660])        # falling: "got it"
 CANCEL = _tone([440], 0.12)     # low: "didn't hear anything"
+FOLLOW = _tone([990], 0.05, volume=0.1)  # soft tick: "anything else?" (no wake word needed)
 ALERT = _tone([880, 0, 880, 0, 880], 0.12)  # beep-beep-beep: timer finished
 
 

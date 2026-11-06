@@ -31,7 +31,11 @@ Rules:
 - After a tool succeeds, just confirm it briefly. Do not call the same tool again.
 - If a tool returns an error, repeat its reason briefly. Don't guess at other causes.
 - If the user repeats a request or asks again after an error, call the tool again. Never answer from an earlier result.
+- Anything that changes over time (time left on timers, the current time, what's playing, the volume) must come from a fresh tool call every time it's asked, even if you answered a moment ago. Never work it out from earlier messages.
 - Your input comes from speech-to-text and names are often misheard ("Eraser" or "Wacer" for "Racer"). If the user asks to open something, ALWAYS call a tool with the name as heard; the tools match names by sound. Never say something doesn't exist without a tool result saying so.
+- Numbers get misheard too: "thin" or "tin" means ten, "for" four, "to" or "too" two, "won" one, "ate" eight. Use the number that fits instead of asking.
+- "City timer" or "sit a timer" means "set a timer" (no label). "Table", "timber" or "time" next to cancel, change or "how long" usually means "timer". If a cancel or change names a timer that doesn't exist, call the tool anyway; it will list the real timers.
+- Short follow-ups refer to your last action. After setting a timer, "make it ten" or "actually two minutes" means change_timer, not a new timer. "Restart the timer" and "name it pizza" (often misheard, e.g. "memit pizza") are change_timer too. Unnamed timers are called by their length, e.g. "the 2 minute timer".
 - If the user asks to open something that sounds like one of their Unity projects (listed below), use open_unity_project. Otherwise use open_app.
 - Users often add a description after a name ("Racer, as in the Formula 1 game"). Use only the name itself, or pick the project that fits the description.
 - If a request is unclear or no tool fits, say so in one sentence.
@@ -113,16 +117,30 @@ class Brain:
         self._last_turn = time.time()
 
         self._history.append({"role": "user", "content": text})
-        turn_start = len(self._history) - 1
 
         # Tool calls already run during this command, so the model can't open Discord twice.
         done: dict[str, str] = {}
 
         reply = ""
+        nudged = False
         for _ in range(self.max_tool_rounds + 1):
             message = self._chat()
             content = _clean(message.get("content", ""))
             calls = message.get("tool_calls") or []
+
+            # Small models sometimes say "I've set a timer" without calling anything.
+            # Catch that once: tell it nothing happened and make it try again.
+            if not calls and not done and not nudged and claims_action(content):
+                nudged = True
+                print(f"[brain] claimed an action without a tool call: {content!r}; retrying")
+                self._history.append({"role": "assistant", "content": content})
+                self._history.append({"role": "user", "content": _NUDGE})
+                message = self._chat()
+                del self._history[-2:]  # keep the slip and the nudge out of the conversation
+                content = _clean(message.get("content", ""))
+                calls = message.get("tool_calls") or []
+                if not calls and claims_action(content):
+                    content = "Sorry, I didn't catch what you wanted me to do. Could you say it again?"
 
             # Store only the final answer, never leaked reasoning, so it can't snowball.
             self._history.append({
@@ -216,6 +234,26 @@ class Brain:
         user_idx = [i for i, m in enumerate(self._history) if m["role"] == "user"]
         if len(user_idx) > self.history_turns:
             self._history = self._history[user_idx[-self.history_turns]:]
+
+
+_NUDGE = ("(System check, not from the user: you did not call any tool, so nothing was done. "
+          "If the user asked for an action, call the right tool now. If you're not sure what "
+          "they meant, ask them briefly. Never say you did something without a tool result.)")
+
+# "I've set a timer", "Timer has been cancelled", "Opened Spotify", "Done."...
+_ACTION_VERBS = (r"set|started|opened|launched|cancel+ed|changed|renamed|restarted|paused|"
+                 r"resumed|played|skipped|muted|unmuted|turned|created|closed|searched|stopped")
+_CLAIM = re.compile(
+    rf"\b(i['’]?ve|i have|i['’]?ll|i will|i just|i went ahead and)\s+(\w+\s+)?({_ACTION_VERBS}|set up)\b"
+    rf"|\b(has|have|was|were|is)\s+(now\s+)?been\s+({_ACTION_VERBS})\b"
+    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_action(text: str) -> bool:
+    """True if a reply says something was done (which needs a tool call to be true)."""
+    return bool(_CLAIM.search(text.strip()))
 
 
 def _clean(text: str) -> str:

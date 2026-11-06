@@ -4,6 +4,11 @@
 hands the reply to the Speaker, which talks on its own threads while this
 loop keeps listening.
 
+Follow-ups: after JARVIS replies, a soft tick plays and it listens for
+`follow_up_s` without needing the wake word. Each answer opens another
+window, so you can keep talking. Silence, or "thanks" / "that's all",
+closes it.
+
 While JARVIS is talking, the mic hears its voice. To stop it reacting to
 itself:
   - the noise floor isn't updated (its voice would raise it),
@@ -11,8 +16,8 @@ itself:
     can still interrupt it, but its own speech can't),
   - when it stops talking, any audio queued up meanwhile is thrown away.
 
-Other apps (music, videos) are turned down from the wake word until
-JARVIS has finished replying, so Whisper hears you and you hear the answer.
+Other apps (music, videos) are turned down from the wake word until the
+conversation ends, so Whisper hears you and you hear the answer.
 """
 
 from __future__ import annotations
@@ -37,9 +42,24 @@ if TYPE_CHECKING:
 # The tail of "Hey Jarvis" sometimes leaks into the recording. Strip it off.
 _WAKE_PREFIX = re.compile(r"^\s*(hey[\s,]+)?jarvis[\s,.!?]*", re.IGNORECASE)
 
+# Said in a follow-up window, these end the conversation instead of going to the brain.
+# Also catches Whisper's habit of "hearing" "Thank you." in near-silence.
+_DISMISS = re.compile(
+    r"^(no|nope|nah|no thanks?|no thank you|thanks?|thank you|thanks a lot|cheers|"
+    r"that'?s (all|it|everything)|that is all|nothing|nothing else|never ?mind|"
+    r"ok(ay)?|cool|great|perfect|got it|good|all good|stop|cancel|bye|goodbye)"
+    r"( (jarvis|sir|mate))?$",
+    re.IGNORECASE,
+)
+
 
 def clean_command(text: str) -> str:
     return _WAKE_PREFIX.sub("", text).strip()
+
+
+def is_dismissal(text: str) -> bool:
+    words = re.sub(r"[^\w' ]", " ", text.lower())
+    return bool(_DISMISS.match(" ".join(words.split())))
 
 
 class VoicePipeline:
@@ -82,6 +102,7 @@ class VoicePipeline:
         print(f'Listening for "{self.wake.name}"...  (Ctrl+C to quit)')
         cooldown = 0
         was_talking = False
+        follow_up = False  # a command was just handled; listen again once the reply ends
 
         try:
             while True:
@@ -91,7 +112,14 @@ class VoicePipeline:
 
                 talking = self._talking()
 
-                # Reply finished (or there was none): bring the music back up.
+                # Reply finished: listen for a follow-up without the wake word.
+                if follow_up and not talking:
+                    follow_up = self._listen_and_handle(on_command, follow_up=True)
+                    cooldown = self._reset()
+                    was_talking = self._talking()
+                    continue
+
+                # Conversation over: bring the music back up.
                 if self.ducker and self.ducker.active and not talking:
                     self.ducker.restore()
 
@@ -129,21 +157,36 @@ class VoicePipeline:
 
                 if self.ducker:
                     self.ducker.duck()
-                self._listen_and_handle(on_command)
-
-                # Start fresh: drop audio that queued up while we were busy, and
-                # clear the wake model's buffer so it can't re-trigger on old audio.
-                self.source.clear()
-                self.wake.reset()
-                cooldown = self._cooldown_chunks
+                follow_up = self._listen_and_handle(on_command)
+                cooldown = self._reset()
                 was_talking = self._talking()
-                print(f'\nListening for "{self.wake.name}"...')
         finally:
             if self.ducker:
                 self.ducker.restore(fade=False)
 
-    def _listen_and_handle(self, on_command) -> None:
-        if self.config.chime:
+    def _reset(self) -> int:
+        """Start fresh after a command. Returns the cooldown in chunks."""
+        # Drop audio that queued up while we were busy, and clear the wake
+        # model's buffer so it can't re-trigger on old audio.
+        self.source.clear()
+        self.wake.reset()
+        if not self._talking():
+            print(f'\nListening for "{self.wake.name}"...')
+        return self._cooldown_chunks
+
+    def _listen_and_handle(self, on_command, follow_up: bool = False) -> bool:
+        """Record and handle one command. Returns True if it was sent to `on_command`
+        (and so a follow-up window should open when the reply ends)."""
+        if follow_up:
+            if not self.config.follow_up:
+                return False
+            if self.config.chime:
+                sounds.play(sounds.FOLLOW)
+                time.sleep(0.12)      # let the tick finish so the mic doesn't record it
+            self.source.clear()
+            self.wake.reset()
+            print(f"[follow-up] listening for {self.config.follow_up_s:.0f}s (no wake word needed)")
+        elif self.config.chime:
             sounds.play(sounds.WAKE)
 
         # Nothing plays while recording, so a timer going off can't end up in the
@@ -152,34 +195,42 @@ class VoicePipeline:
             audio = self.recorder.record(
                 self.source,
                 on_speech_start=lambda: print("[rec] recording..."),
+                start_timeout_s=self.config.follow_up_s if follow_up else None,
             )
 
             if audio is None:
+                if follow_up:
+                    print("[follow-up] nothing more; back to waiting for the wake word")
+                    return False
                 print("[rec] didn't hear a command")
                 if self.config.chime:
                     sounds.play(sounds.CANCEL)
-                return
+                return False
 
             print(f"[rec] got {len(audio) / 16000:.1f}s of audio")
             if self.config.chime:
                 sounds.play(sounds.DONE)
             if self.config.save_recordings:
                 self._save(audio)
-            self._handle(audio, on_command)
+            return self._handle(audio, on_command, follow_up)
 
-    def _handle(self, audio, on_command) -> None:
+    def _handle(self, audio, on_command, follow_up: bool) -> bool:
         if self.transcriber is None:
             on_command("", None)
-            return
+            return False
         print("[stt] transcribing...")
         result = self.transcriber.transcribe(audio)
         text = clean_command(result.text)
         if not text:
             print("[stt] (couldn't make out any words)")
-            if self.config.chime:
+            if self.config.chime and not follow_up:
                 sounds.play(sounds.CANCEL)
-            return
+            return False
+        if follow_up and is_dismissal(text):
+            print(f'>> "{text}"   (ending the conversation)')
+            return False
         on_command(text, result)
+        return True
 
     @staticmethod
     def _save(audio) -> None:

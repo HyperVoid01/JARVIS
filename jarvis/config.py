@@ -41,9 +41,9 @@ class Config:
     whisper_device: str = "cpu"      # auto / cpu / cuda
     whisper_compute_type: str = "auto"  # auto / int8 / float16 / int8_float16
     language: str | None = "en"      # None = auto-detect (needs a non-.en model)
-    beam_size: int = 5
+    beam_size: int = 2
     # Biases Whisper toward words it should expect. Add names you use a lot.
-    initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord."
+    initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord. Set a timer for ten minutes. Cancel the timer. How long is left on the timer?"
 
     # --- Brain (LLM via Ollama) -------------------------------------------
     # Instruct (non-reasoning) model: answers instantly. Plain "qwen3:4b" is a slow thinking model.
@@ -76,6 +76,11 @@ class Config:
     # Turn other apps (Spotify, YouTube...) down from the wake word until the reply ends.
     duck: bool = True
     duck_level: float = 0.2          # fraction of each app's own volume to keep (0 = silent)
+
+    # --- Follow-ups -------------------------------------------------------
+    # After a reply, keep listening briefly so you can answer without "Hey Jarvis".
+    follow_up: bool = True
+    follow_up_s: float = 10.0         # how long to wait for you to start talking
 
     # --- Tools ------------------------------------------------------------
     # Folders to search for Unity projects. None = Documents, Desktop, D:\ and a few common spots.

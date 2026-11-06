@@ -48,7 +48,7 @@ class CommandRecorder:
         min_speech_rms: float = 50.0,
     ):
         self._vad = webrtcvad.Vad(aggressiveness)
-        self._start_timeout_chunks = int(start_timeout_s * 1000 / CHUNK_MS)
+        self._start_timeout_s = start_timeout_s
         self._end_silence_chunks = int(end_silence_s * 1000 / CHUNK_MS)
         self._max_chunks = int(max_command_s * 1000 / CHUNK_MS)
         self._min_speech_chunks = max(1, int(min_speech_s * 1000 / CHUNK_MS))
@@ -88,18 +88,23 @@ class CommandRecorder:
         self,
         source: AudioSource,
         on_speech_start: Callable[[], None] | None = None,
+        start_timeout_s: float | None = None,
     ) -> np.ndarray | None:
         """Pull chunks from `source` until the command ends.
 
-        Returns the recorded int16 audio, or None if nothing was said.
+        Returns the recorded int16 audio, or None if nothing was said within
+        `start_timeout_s` (defaults to the value given at construction).
         """
+        timeout_s = self._start_timeout_s if start_timeout_s is None else start_timeout_s
+        start_timeout_chunks = max(1, int(timeout_s * 1000 / CHUNK_MS))
+
         chunks: list[np.ndarray] = []
         speech_chunks = 0
         silence_run = 0
         started = False
         pre_roll: list[np.ndarray] = []  # keeps the start of a word that VAD caught late
 
-        for n in range(self._start_timeout_chunks + self._max_chunks):
+        for n in range(start_timeout_chunks + self._max_chunks):
             chunk = source.read()
             if chunk is None:  # source ended (file mode)
                 break
@@ -114,7 +119,7 @@ class CommandRecorder:
                     speech_chunks = 1
                     if on_speech_start:
                         on_speech_start()
-                elif n >= self._start_timeout_chunks:
+                elif n >= start_timeout_chunks:
                     return None
                 continue
 

@@ -109,9 +109,20 @@ JARVIS: Spotify is open, sir.
 | "Set the volume to 50%" / "Turn it up a bit" / "Mute" / "What's the volume?" | `volume` (Windows Core Audio) |
 | "Pause Spotify" / "Next song" / "Resume YouTube" / "What's playing?" | `media_control` (per-app, via Windows media sessions) |
 | "Set a timer for 10 minutes for pizza" / "How long is left?" | `set_timer`, `list_timers` (finished timers are announced out loud) |
+| "Actually make it 15" / "Cancel the pizza timer" / "Cancel all timers" | `change_timer`, `cancel_timer` |
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
 
-It remembers the last few commands, so follow-ups like "now make it 5 minutes" work. The memory resets after 5 minutes of silence.
+After each reply, a soft tick plays and JARVIS listens for 4 seconds without the wake word, so you can keep talking:
+
+```
+You:    Hey Jarvis, set a timer for 5 minutes.
+JARVIS: Timer set for 5 minutes.        *tick*
+You:    Actually, make it ten.
+JARVIS: Done, ten minutes it is.        *tick*
+You:    Thanks.                         (conversation ends)
+```
+
+Silence, or "thanks", "that's all", "no", "never mind", ends the conversation. Music stays ducked until it does. It also remembers the last few commands, so "now make it 5 minutes" works later too. That memory resets after 5 minutes of silence.
 
 ### Unity projects
 
@@ -179,6 +190,8 @@ Every setting in `jarvis/config.py` is also a flag, e.g. `--wake-threshold 0.6`.
 | Interrupts itself while talking | `--barge-in-threshold 0.85`, or `--no-barge-in` to turn interrupting off |
 | Hard to interrupt | `--barge-in-threshold 0.6`, or turn the speakers down / use headphones |
 | Reacts to the end of its own reply | `--echo-tail-s 0.8` |
+| Follow-up window too short / too long | `--follow-up-s 6` or `2`; `--no-follow-up` turns it off |
+| Reacts to people talking nearby after a reply | `--follow-up-s 2`, or `--no-follow-up` |
 | Music too loud / too quiet while it listens | `--duck-level 0.1` (quieter) or `0.4` (louder); `--no-duck` turns it off |
 | An app stayed quiet after closing JARVIS | It was force-closed mid-command; raise the app again in Windows' Volume Mixer |
 | Talks too fast / slow | `--tts-speed 0.9` (slower) or `1.2` (faster) |
