@@ -231,7 +231,7 @@ def open_website(url: str) -> str:
 
 @tool
 def web_search(query: str, site: Literal["google", "youtube"] = "google") -> str:
-    """Search the web and show the results in the browser. Use when the user asks to look something up.
+    """Open a Google or YouTube search in the browser. ONLY when the user explicitly asks to search, look it up online, or show results; never for ordinary questions you can answer.
 
     Args:
         query: What to search for.

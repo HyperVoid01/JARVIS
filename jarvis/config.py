@@ -41,7 +41,7 @@ class Config:
     whisper_device: str = "cpu"      # auto / cpu / cuda
     whisper_compute_type: str = "auto"  # auto / int8 / float16 / int8_float16
     language: str | None = "en"      # None = auto-detect (needs a non-.en model)
-    beam_size: int = 2
+    beam_size: int = 5
     # Biases Whisper toward words it should expect. Add names you use a lot.
     initial_prompt: str | None = "Jarvis, open, launch, Unity, Visual Studio, Spotify, Discord. Set a timer for ten minutes. Cancel the timer. How long is left on the timer?"
 
@@ -71,6 +71,11 @@ class Config:
     barge_in: bool = True
     barge_in_threshold: float = 0.7
     echo_tail_s: float = 0.4         # keep ignoring the mic this long after it stops talking
+    # Talk over JARVIS to cut it off (no wake word). Your voice must be `interrupt_margin`
+    # times louder than the echo of its own voice, for at least `interrupt_min_s`.
+    interrupt_on_speech: bool = True
+    interrupt_margin: float = 2.0    # raise if it interrupts itself, lower if it ignores you
+    interrupt_min_s: float = 0.3     # how long you must talk over it before it stops
 
     # --- Ducking ----------------------------------------------------------
     # Turn other apps (Spotify, YouTube...) down from the wake word until the reply ends.

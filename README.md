@@ -27,7 +27,7 @@ A local, offline voice assistant. Built in stages:
                     reply ──► Piper (sentence by sentence) ──► speakers
 ```
 
-Speech plays on its own threads, so JARVIS keeps listening while it talks. Saying "Hey Jarvis" over it cuts it off and starts a new command.
+Speech plays on its own threads, so JARVIS keeps listening while it talks. Talk over it (or say "Hey Jarvis") and it stops mid-sentence and listens to you.
 
 | File | Job |
 |---|---|
@@ -40,6 +40,8 @@ Speech plays on its own threads, so JARVIS keeps listening while it talks. Sayin
 | `jarvis/pipeline.py` | The listen → record → transcribe loop, and the self-hearing guard |
 | `jarvis/brain.py` | Ollama chat + tool-calling loop, short conversation memory |
 | `jarvis/tts.py` | Piper text-to-speech: streamed playback, interrupt, hold |
+| `jarvis/interrupt.py` | Tells your voice apart from JARVIS's own echo, so you can talk over it |
+| `jarvis/ducking.py` | Turns other apps down while JARVIS listens and talks |
 | `jarvis/tools/__init__.py` | `@tool` decorator: turns a Python function into something the LLM can call |
 | `jarvis/tools/system.py` | Time, apps, websites, web search, timers |
 | `jarvis/tools/media.py` | Per-app playback control and system volume |
@@ -169,10 +171,13 @@ python main.py --say "Good evening, sir." --tts-speed 1.2            # quicker
 
 Piper runs on the CPU, so it doesn't compete with the LLM for VRAM. Replies are spoken sentence by sentence: the first sentence starts while the rest is still being generated.
 
-**How it avoids hearing itself.** The mic picks up JARVIS's own voice, especially on laptop speakers. While it's talking:
+**Interrupting it.** Just talk over it. The mic hears JARVIS's own voice too, so it can't simply listen for "someone talking". Instead it knows how loud it's playing at every moment and learns how much of that leaks back into the mic. Sound only counts as you when it's `--interrupt-margin` (2.0) times louder than that expected echo, sounds like a voice, and lasts `--interrupt-min-s` (0.3 s). The start of what you said is kept. On laptop speakers you may need to speak up a little; with headphones there's no echo and any speech works. "Hey Jarvis" also still interrupts it.
+
+**How it avoids hearing itself.** While it's talking:
 
 - the room noise level isn't updated, so its voice doesn't raise the bar for detecting yours,
-- the wake word only counts above `--barge-in-threshold` (0.7), higher than the normal 0.5, so "Hey Jarvis" still interrupts it but its own speech doesn't,
+- speech must be well above its own predicted echo to count as an interruption,
+- the wake word only counts above `--barge-in-threshold` (0.7), higher than the normal 0.5,
 - when it stops, the audio buffered meanwhile is thrown away (plus `--echo-tail-s` for the last bit leaving the speakers).
 
 While you're giving a command nothing is played, so a timer going off can't end up in your recording; it's announced right after.
@@ -187,8 +192,10 @@ Every setting in `jarvis/config.py` is also a flag, e.g. `--wake-threshold 0.6`.
 |---|---|
 | Triggers when nobody said "Hey Jarvis" | `--wake-threshold 0.6` or higher, or `--wake-vad-threshold 0.5` |
 | Doesn't respond to you | `--debug` to watch scores, then lower `--wake-threshold` (try 0.35) |
-| Interrupts itself while talking | `--barge-in-threshold 0.85`, or `--no-barge-in` to turn interrupting off |
-| Hard to interrupt | `--barge-in-threshold 0.6`, or turn the speakers down / use headphones |
+| Interrupts itself while talking | `--interrupt-margin 2.5` (or 3). `--debug` shows `[interrupt] mic … predicted echo …` lines so you can see why |
+| Ignores you when you talk over it | `--interrupt-margin 1.7`, speak up a little, turn the speakers down, or use headphones |
+| Stops on a cough or a word from someone else | `--interrupt-min-s 0.5` |
+| Don't want talking over it to interrupt | `--no-interrupt-on-speech` ("Hey Jarvis" still works; `--no-barge-in` turns that off too) |
 | Reacts to the end of its own reply | `--echo-tail-s 0.8` |
 | Follow-up window too short / too long | `--follow-up-s 6` or `2`; `--no-follow-up` turns it off |
 | Reacts to people talking nearby after a reply | `--follow-up-s 2`, or `--no-follow-up` |

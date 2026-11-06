@@ -26,7 +26,9 @@ from . import tools
 SYSTEM_PROMPT = """You are JARVIS, a voice assistant running on {user}'s Windows PC.
 
 Rules:
-- Your replies are read aloud, so answer in one or two short sentences. No markdown, lists, emojis or code.
+- Your replies are read aloud, so keep them to one or two short sentences (under 35 words), even for big topics. Give the single most useful point; the user will ask if they want more. No markdown, lists, emojis or code.
+- Answer general-knowledge questions yourself, without tools. Only use web_search when the user explicitly asks you to search, look something up online, or show results.
+- If you're not sure a fact is right, say so briefly instead of guessing. Don't add filler like "this information is from general sources".
 - When the user asks you to do something on the PC, call the matching tool once. Never claim you did something unless a tool result confirms it.
 - After a tool succeeds, just confirm it briefly. Do not call the same tool again.
 - If a tool returns an error, repeat its reason briefly. Don't guess at other causes.
@@ -58,6 +60,7 @@ class Brain:
         history_turns: int = 6,
         history_timeout_s: float = 300,
         max_tool_rounds: int = 4,
+        max_sentences: int = 3,
         user_name: str = "the user",
         extra_context=None,
         debug: bool = False,
@@ -69,6 +72,7 @@ class Brain:
         self.history_turns = history_turns
         self.history_timeout_s = history_timeout_s
         self.max_tool_rounds = max_tool_rounds
+        self.max_sentences = max_sentences
         self.user_name = user_name
         # Optional callable returning extra facts for the system prompt (e.g. project names).
         self.extra_context = extra_context
@@ -182,6 +186,9 @@ class Brain:
             reply = next(iter(reversed(list(done.values()))), "") or "Done."
             self._history.append({"role": "assistant", "content": reply})
 
+        reply = shorten(reply, self.max_sentences)
+        if self._history and self._history[-1]["role"] == "assistant":
+            self._history[-1]["content"] = reply  # remember what was actually said
         self._trim_history()
         return reply
 
@@ -209,7 +216,8 @@ class Brain:
             "stream": False,
             "think": False,  # disables reasoning on hybrid models; instruct models ignore it
             "keep_alive": self.keep_alive,
-            "options": {"num_ctx": self.num_ctx, "temperature": 0.3},
+            # num_predict caps reply length (and keeps replies fast); tool calls fit easily.
+            "options": {"num_ctx": self.num_ctx, "temperature": 0.3, "num_predict": 200},
         }
         start = time.perf_counter()
         try:
@@ -254,6 +262,24 @@ _CLAIM = re.compile(
 def claims_action(text: str) -> bool:
     """True if a reply says something was done (which needs a tool call to be true)."""
     return bool(_CLAIM.search(text.strip()))
+
+
+def shorten(text: str, max_sentences: int = 3) -> str:
+    """Hard limit on spoken length: keep the first few sentences.
+
+    The prompt asks for short replies, but a small model will sometimes give a
+    lecture anyway (and cut off mid-sentence at the token limit).
+    """
+    if max_sentences <= 0:
+        return text
+    # Split after . ! ? that end a sentence (not "Dr." or "3.5").
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])", text.strip())
+    kept = " ".join(parts[:max_sentences])
+    if kept and kept[-1] not in ".!?":
+        # Cut off by the token limit: end on the last full sentence if there is one.
+        last = max(kept.rfind(". "), kept.rfind("! "), kept.rfind("? "))
+        kept = kept[: last + 1] if last > 0 else kept + "."
+    return kept
 
 
 def _clean(text: str) -> str:

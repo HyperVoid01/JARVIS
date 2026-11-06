@@ -9,11 +9,16 @@ Follow-ups: after JARVIS replies, a soft tick plays and it listens for
 window, so you can keep talking. Silence, or "thanks" / "that's all",
 closes it.
 
+Interrupting: while JARVIS talks you can speak over it (interrupt.py tells
+your voice apart from its own echo), or say "Hey Jarvis". Either way it
+stops mid-sentence and listens.
+
 While JARVIS is talking, the mic hears its voice. To stop it reacting to
 itself:
   - the noise floor isn't updated (its voice would raise it),
-  - the wake word only counts above `barge_in_threshold` (so "Hey Jarvis"
-    can still interrupt it, but its own speech can't),
+  - speech only counts as an interruption when it's well above the echo
+    JARVIS expects from its own playback,
+  - the wake word only counts above `barge_in_threshold`,
   - when it stops talking, any audio queued up meanwhile is thrown away.
 
 Other apps (music, videos) are turned down from the wake word until the
@@ -31,11 +36,14 @@ from typing import TYPE_CHECKING, Callable
 from . import sounds
 from .audio import AudioSource, save_wav
 from .config import CHUNK_MS, Config
+from .interrupt import InterruptDetector
 from .recorder import CommandRecorder
 from .stt import Transcriber, Transcript
 from .wakeword import WakeWordDetector
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from .ducking import Ducker
     from .tts import Speaker
 
@@ -44,13 +52,14 @@ _WAKE_PREFIX = re.compile(r"^\s*(hey[\s,]+)?jarvis[\s,.!?]*", re.IGNORECASE)
 
 # Said in a follow-up window, these end the conversation instead of going to the brain.
 # Also catches Whisper's habit of "hearing" "Thank you." in near-silence.
-_DISMISS = re.compile(
-    r"^(no|nope|nah|no thanks?|no thank you|thanks?|thank you|thanks a lot|cheers|"
+_DISMISS_PHRASE = (
+    r"(no|nope|nah|no thanks?|no thank you|thanks?|thank you|thanks a lot|cheers|"
     r"that'?s (all|it|everything)|that is all|nothing|nothing else|never ?mind|"
-    r"ok(ay)?|cool|great|perfect|got it|good|all good|stop|cancel|bye|goodbye)"
-    r"( (jarvis|sir|mate))?$",
-    re.IGNORECASE,
+    r"ok(ay)?|alright|right|cool|great|perfect|got it|good|all good|stop|cancel|bye|goodbye|"
+    r"for now|jarvis|sir|mate)"
 )
+# One or more of those in a row: "okay, that's all", "no thanks Jarvis", "great, thank you".
+_DISMISS = re.compile(rf"^{_DISMISS_PHRASE}( {_DISMISS_PHRASE})*$", re.IGNORECASE)
 
 
 def clean_command(text: str) -> str:
@@ -93,6 +102,14 @@ class VoicePipeline:
             speech_energy_ratio=config.speech_energy_ratio,
             min_speech_rms=config.min_speech_rms,
         )
+        self.interrupter = None
+        if speaker is not None and config.interrupt_on_speech:
+            self.interrupter = InterruptDetector(
+                self.recorder,
+                margin=config.interrupt_margin,
+                min_s=config.interrupt_min_s,
+                debug=debug,
+            )
         self._cooldown_chunks = int(config.wake_cooldown_s * 1000 / CHUNK_MS)
 
     def _talking(self) -> bool:
@@ -127,9 +144,23 @@ class VoicePipeline:
                     # JARVIS just finished speaking: drop the echo of its own voice.
                     self.source.clear()
                     self.wake.reset()
+                    if self.interrupter:
+                        self.interrupter.reset()
                     was_talking = False
                     continue
                 was_talking = talking
+
+                # Talked over: stop mid-sentence and record what the user is saying.
+                if talking and self.interrupter and self.speaker.speaking:
+                    if self.interrupter.update(chunk, self.speaker.playback_rms()):
+                        speech = self.interrupter.take()
+                        self.speaker.stop()
+                        print("\n[interrupt] you spoke over JARVIS; listening")
+                        follow_up = self._listen_and_handle(on_command, preroll=speech)
+                        self.interrupter.reset()
+                        cooldown = self._reset()
+                        was_talking = self._talking()
+                        continue
 
                 if not talking:
                     self.recorder.observe_background(chunk)  # learn the room's noise level
@@ -145,6 +176,8 @@ class VoicePipeline:
                     if self.wake.last_score < self.config.barge_in_threshold:
                         continue
                     self.speaker.stop()
+                    if self.interrupter:
+                        self.interrupter.reset()
                     print(f"\n[wake] interrupted (score {self.wake.last_score:.2f})")
                 else:
                     detected = self.wake.process(chunk)
@@ -174,10 +207,20 @@ class VoicePipeline:
             print(f'\nListening for "{self.wake.name}"...')
         return self._cooldown_chunks
 
-    def _listen_and_handle(self, on_command, follow_up: bool = False) -> bool:
+    def _listen_and_handle(
+        self,
+        on_command,
+        follow_up: bool = False,
+        preroll: list[np.ndarray] | None = None,
+    ) -> bool:
         """Record and handle one command. Returns True if it was sent to `on_command`
-        (and so a follow-up window should open when the reply ends)."""
-        if follow_up:
+        (and so a follow-up window should open when the reply ends).
+
+        `preroll` is speech already captured when the user talked over JARVIS.
+        """
+        if preroll:
+            pass  # you're mid-sentence: no chime (the mic would record it) and keep the audio
+        elif follow_up:
             if not self.config.follow_up:
                 return False
             if self.config.chime:
@@ -196,6 +239,7 @@ class VoicePipeline:
                 self.source,
                 on_speech_start=lambda: print("[rec] recording..."),
                 start_timeout_s=self.config.follow_up_s if follow_up else None,
+                preroll=preroll,
             )
 
             if audio is None:
@@ -212,7 +256,8 @@ class VoicePipeline:
                 sounds.play(sounds.DONE)
             if self.config.save_recordings:
                 self._save(audio)
-            return self._handle(audio, on_command, follow_up)
+            # Talking over JARVIS is a follow-up too: "thanks" / "stop" just end it.
+            return self._handle(audio, on_command, follow_up or bool(preroll))
 
     def _handle(self, audio, on_command, follow_up: bool) -> bool:
         if self.transcriber is None:

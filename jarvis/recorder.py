@@ -89,11 +89,15 @@ class CommandRecorder:
         source: AudioSource,
         on_speech_start: Callable[[], None] | None = None,
         start_timeout_s: float | None = None,
+        preroll: list[np.ndarray] | None = None,
     ) -> np.ndarray | None:
         """Pull chunks from `source` until the command ends.
 
         Returns the recorded int16 audio, or None if nothing was said within
         `start_timeout_s` (defaults to the value given at construction).
+
+        `preroll` is speech already heard (e.g. the user talking over JARVIS):
+        recording continues from it instead of waiting for speech to start.
         """
         timeout_s = self._start_timeout_s if start_timeout_s is None else start_timeout_s
         start_timeout_chunks = max(1, int(timeout_s * 1000 / CHUNK_MS))
@@ -103,6 +107,10 @@ class CommandRecorder:
         silence_run = 0
         started = False
         pre_roll: list[np.ndarray] = []  # keeps the start of a word that VAD caught late
+        if preroll:
+            chunks = list(preroll)
+            speech_chunks = len(preroll)
+            started = True
 
         for n in range(start_timeout_chunks + self._max_chunks):
             chunk = source.read()

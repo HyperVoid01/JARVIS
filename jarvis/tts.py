@@ -15,6 +15,7 @@ that it works offline. voice_fx.py adds the JARVIS-style processing.
 from __future__ import annotations
 
 import queue
+from collections import deque
 import re
 import threading
 import time
@@ -70,6 +71,7 @@ class Speaker:
         self._released = threading.Event()
         self._released.set()
         self.last_spoke = 0.0   # time.monotonic() when the speakers last went quiet
+        self._played: deque[tuple[float, float]] = deque(maxlen=64)  # (time, loudness) per block
 
         threading.Thread(target=self._synth_loop, daemon=True, name="tts-synth").start()
         threading.Thread(target=self._play_loop, daemon=True, name="tts-play").start()
@@ -92,6 +94,15 @@ class Speaker:
     @property
     def speaking(self) -> bool:
         return self._pending > 0
+
+    def playback_rms(self, window_s: float = 0.35) -> float:
+        """How loud JARVIS has been over the last `window_s` (loudest block, int16 RMS).
+
+        The window covers the speaker buffer and the trip back into the mic, so the
+        echo the mic hears now is matched against what was actually playing.
+        """
+        cutoff = time.monotonic() - window_s
+        return max((level for t, level in list(self._played) if t >= cutoff), default=0.0)
 
     def recently_speaking(self, tail_s: float = 0.3) -> bool:
         """True while speaking and for `tail_s` after, while the last audio leaves the speakers."""
@@ -175,7 +186,10 @@ class Speaker:
                 if gen != self._gen:
                     break
                 try:
-                    self._stream.write(item[i:i + block].reshape(-1, 1))
+                    piece = item[i:i + block]
+                    self._stream.write(piece.reshape(-1, 1))
+                    level = float(np.sqrt(np.mean(piece.astype(np.float32) ** 2)))
+                    self._played.append((time.monotonic(), level))
                 except Exception as e:
                     print(f"[tts] playback failed: {e}")
                     break
