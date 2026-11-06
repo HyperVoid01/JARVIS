@@ -40,6 +40,9 @@ Rules:
 - Short follow-ups refer to your last action. After setting a timer, "make it ten" or "actually two minutes" means change_timer, not a new timer. "Restart the timer" and "name it pizza" (often misheard, e.g. "memit pizza") are change_timer too. Unnamed timers are called by their length, e.g. "the 2 minute timer".
 - If the user asks to open something that sounds like one of their Unity projects (listed below), use open_unity_project. Otherwise use open_app.
 - Users often add a description after a name ("Racer, as in the Formula 1 game"). Use only the name itself, or pick the project that fits the description.
+- If a tool result says it needs the user's OK, ask that question and stop. Only call it again with confirmed=true after the user says yes; if they say no, drop it.
+- Right after a shutdown or restart was started, a bare "cancel" or "stop" means power cancel_shutdown.
+- "Close" an app means window close; "quit", "kill" or "exit" it, or closing something that hides in the tray, means window quit.
 - If a request is unclear or no tool fits, say so in one sentence.
 - Be helpful with a dry, understated wit, like the JARVIS from Iron Man. Address the user as "sir" occasionally, not every time.
 
@@ -121,6 +124,7 @@ class Brain:
         self._last_turn = time.time()
 
         self._history.append({"role": "user", "content": text})
+        tools.begin_turn()
 
         # Tool calls already run during this command, so the model can't open Discord twice.
         done: dict[str, str] = {}
@@ -186,11 +190,38 @@ class Brain:
             reply = next(iter(reversed(list(done.values()))), "") or "Done."
             self._history.append({"role": "assistant", "content": reply})
 
+        # A tool asked for the user's OK: say exactly that question, whatever the model wrote
+        # (a small model might say "Shutting down now" when nothing has happened).
+        for result in done.values():
+            m = re.search(r'Ask them exactly: "(.+?)"', result)
+            if m:
+                reply = m.group(1)
         reply = shorten(reply, self.max_sentences)
         if self._history and self._history[-1]["role"] == "assistant":
             self._history[-1]["content"] = reply  # remember what was actually said
         self._trim_history()
         return reply
+
+    def remember(self, text: str, reply: str, calls: list[tuple[str, dict, str]] = ()) -> None:
+        """Record a command handled without the LLM (the fast path), so follow-ups still make sense.
+
+        It's stored exactly like a real tool-using turn. If memory showed commands
+        answered without tools, the model would copy that and make answers up.
+        """
+        if time.time() - self._last_turn > self.history_timeout_s:
+            self._history.clear()
+        self._last_turn = time.time()
+        self._history.append({"role": "user", "content": text})
+        if calls:
+            self._history.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"name": name, "arguments": args}} for name, args, _ in calls],
+            })
+            for name, _, result in calls:
+                self._history.append({"role": "tool", "content": result, "tool_name": name})
+        self._history.append({"role": "assistant", "content": reply})
+        self._trim_history()
 
     def reset(self) -> None:
         self._history.clear()
@@ -248,13 +279,22 @@ _NUDGE = ("(System check, not from the user: you did not call any tool, so nothi
           "If the user asked for an action, call the right tool now. If you're not sure what "
           "they meant, ask them briefly. Never say you did something without a tool result.)")
 
-# "I've set a timer", "Timer has been cancelled", "Opened Spotify", "Done."...
+# Replies that only make sense if a tool ran: "I've set a timer", "Timer has been cancelled",
+# "PC is shutting down now", "Chrome and Spotify are open", "Volume decreased to 20%"...
 _ACTION_VERBS = (r"set|started|opened|launched|cancel+ed|changed|renamed|restarted|paused|"
-                 r"resumed|played|skipped|muted|unmuted|turned|created|closed|searched|stopped")
+                 r"resumed|played|skipped|muted|unmuted|turned|created|closed|searched|stopped|"
+                 r"locked|minimi[sz]ed|maximi[sz]ed|switched|quit|killed|decreased|increased|"
+                 r"lowered|raised|adjusted|reduced")
+_STATES = (r"playing|paused|open|closed|locked|minimi[sz]ed|maximi[sz]ed|muted|unmuted|"
+           r"running|shutting down|restarting|signing out|going to sleep|set to|at \d+")
 _CLAIM = re.compile(
     rf"\b(i['’]?ve|i have|i['’]?ll|i will|i just|i went ahead and)\s+(\w+\s+)?({_ACTION_VERBS}|set up)\b"
     rf"|\b(has|have|was|were|is)\s+(now\s+)?been\s+({_ACTION_VERBS})\b"
-    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started)\b",
+    rf"|\b(is|are)\s+(now\s+)?({_STATES})\b"
+    rf"|\b({_ACTION_VERBS})\s+(by|to)\s+\d+"
+    rf"|\b(shutting down|restarting|locking|signing out)\b"
+    rf"|\b(current|volume)\s+(level\s+)?(is\s+)?(at\s+)?\d+\s*(%|percent)"
+    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started|closed|switched)\b",
     re.IGNORECASE,
 )
 

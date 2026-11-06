@@ -45,6 +45,8 @@ Speech plays on its own threads, so JARVIS keeps listening while it talks. Talk 
 | `jarvis/tools/__init__.py` | `@tool` decorator: turns a Python function into something the LLM can call |
 | `jarvis/tools/system.py` | Time, apps, websites, web search, timers |
 | `jarvis/tools/media.py` | Per-app playback control and system volume |
+| `jarvis/tools/windows.py` | Close / quit / switch to / minimize apps; lock, sleep, shut down |
+| `jarvis/fastpath.py` | Instant handling of simple commands, without the LLM |
 | `jarvis/tools/unity.py` | Find Unity projects and open them in the right editor version |
 | `jarvis/sounds.py` | Chimes generated in code |
 
@@ -112,6 +114,8 @@ JARVIS: Spotify is open, sir.
 | "Pause Spotify" / "Next song" / "Resume YouTube" / "What's playing?" | `media_control` (per-app, via Windows media sessions) |
 | "Set a timer for 10 minutes for pizza" / "How long is left?" | `set_timer`, `list_timers` (finished timers are announced out loud) |
 | "Actually make it 15" / "Cancel the pizza timer" / "Cancel all timers" | `change_timer`, `cancel_timer` |
+| "Close Discord" / "Quit Spotify" / "Switch to Chrome" / "Minimize VS Code" / "Show the desktop" / "What's open?" | `window` |
+| "Lock the PC" / "Go to sleep" / "Shut down" / "Restart" / "Cancel the shutdown" | `power` |
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
 
 After each reply, a soft tick plays and JARVIS listens for 4 seconds without the wake word, so you can keep talking:
@@ -125,6 +129,25 @@ You:    Thanks.                         (conversation ends)
 ```
 
 Silence, or "thanks", "that's all", "no", "never mind", ends the conversation. Music stays ducked until it does. It also remembers the last few commands, so "now make it 5 minutes" works later too. That memory resets after 5 minutes of silence.
+
+### Closing apps, and things that ask first
+
+"Close" closes an app's window the normal way, so it can still ask you to save. Apps that hide in the system tray (Discord, Spotify, Steam) keep running; say "quit" to make them exit. Quitting an app that might have unsaved work (VS Code, Unity, Word), shutting down, restarting and signing out all ask "are you sure?" first. Say yes within the follow-up window. This is enforced in code: the model can't answer its own question, and a yes only counts from your next command. Shutdowns and restarts wait 30 seconds, so "cancel the shutdown" (instant, no LLM) or just "cancel" can still stop them.
+
+Sleep uses Windows' sleep call, which hibernates instead if you've turned hibernation on.
+
+### Instant commands
+
+Simple commands skip the LLM entirely and happen straight away: pause, play, next, previous and "what's playing" (optionally for one app, e.g. "pause Spotify"), volume ("volume 40", "turn it up a bit", "louder", "mute"), and the time or date. You'll see `(fast path)` in the log. Anything with more to it, like "play some lofi on YouTube", still goes to the LLM. Turn this off with `--no-fast-path`.
+
+### Start with Windows
+
+```cmd
+python main.py --install-startup      # run this once, from the activated venv
+python main.py --uninstall-startup    # to undo it
+```
+
+This puts `JARVIS.cmd` in your Startup folder, which opens JARVIS in a minimised window every time you log in, using your settings from `jarvis/config.py`. If Ollama isn't running yet, JARVIS starts it and waits for it. To stop JARVIS, close that window or press Ctrl+C in it.
 
 ### Unity projects
 

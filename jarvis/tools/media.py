@@ -127,7 +127,7 @@ async def _media(action: str, app: str) -> str:
     if action == "now_playing":
         return " ".join([await _describe(s) for s in targets])
     if not targets:
-        return "Nothing is playing."
+        return "Nothing is playing." if action == "pause" else "There's nothing to play."
 
     results = []
     for s in targets:
@@ -142,8 +142,12 @@ async def _media(action: str, app: str) -> str:
         if not ok:
             results.append(f"{_app_name(s)} didn't accept {action.replace('_', '/')}.")
             continue
-        if action in ("next", "previous", "play"):
-            await asyncio.sleep(0.6)  # let the app load the new track before reading it
+        if action == "pause":
+            # Apps take a moment to report the new state, so reading it back straight
+            # away still says "playing". The command was accepted; say what was done.
+            results.append(f"Paused {_app_name(s)}.")
+            continue
+        await asyncio.sleep(0.6)  # let the app load the new track / state before reading it
         results.append(await _describe(s))
     return " ".join(results)
 
@@ -163,7 +167,7 @@ def media_control(
     action: Literal["play", "pause", "play_pause", "next", "previous", "now_playing"],
     app: str = "",
 ) -> str:
-    """Control music or video playback: play, pause, skip, or say what's playing.
+    """Control music or video playback: play, pause, skip, or say what's playing. Always call this to find out what's playing; never answer from earlier messages.
 
     Args:
         action: play, pause, play_pause (toggle), next, previous, or now_playing (what song/video is on).
@@ -196,7 +200,7 @@ def volume(
     action: Literal["set", "up", "down", "mute", "unmute", "check"],
     amount: int = 10,
 ) -> str:
-    """Control the system volume.
+    """Control the system volume. Always call this to change or report the volume; never work it out from earlier messages.
 
     Args:
         action: set (exact level), up, down, mute, unmute, or check (say the current level).

@@ -52,10 +52,12 @@ _WAKE_PREFIX = re.compile(r"^\s*(hey[\s,]+)?jarvis[\s,.!?]*", re.IGNORECASE)
 
 # Said in a follow-up window, these end the conversation instead of going to the brain.
 # Also catches Whisper's habit of "hearing" "Thank you." in near-silence.
+# "Cancel" and "stop" are deliberately NOT here: after "shutting down in 30 seconds"
+# they have to reach the brain so the shutdown actually gets cancelled.
 _DISMISS_PHRASE = (
     r"(no|nope|nah|no thanks?|no thank you|thanks?|thank you|thanks a lot|cheers|"
     r"that'?s (all|it|everything)|that is all|nothing|nothing else|never ?mind|"
-    r"ok(ay)?|alright|right|cool|great|perfect|got it|good|all good|stop|cancel|bye|goodbye|"
+    r"ok(ay)?|alright|right|cool|great|perfect|got it|good|all good|bye|goodbye|"
     r"for now|jarvis|sir|mate)"
 )
 # One or more of those in a row: "okay, that's all", "no thanks Jarvis", "great, thank you".

@@ -54,6 +54,9 @@ class Config:
     history_turns: int = 6           # how many past commands JARVIS remembers for follow-ups
     history_timeout_s: float = 300.0 # forget the conversation after this long without a command
     user_name: str = "Sooriyan"
+    # Handle simple commands ("pause", "next song", "volume 40", "what time is it")
+    # instantly, without the LLM. See jarvis/fastpath.py for what counts as simple.
+    fast_path: bool = True
 
     # --- Voice (text-to-speech via Piper) ---------------------------------
     tts: bool = True                 # speak replies out loud (--no-tts to only print them)

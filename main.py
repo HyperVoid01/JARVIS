@@ -5,6 +5,8 @@
     python main.py --no-tts                # print replies instead of speaking them
     python main.py --no-brain              # voice -> text only, no LLM (Stage 1 behaviour)
     python main.py --say "Hello, sir."     # test the voice and exit
+    python main.py --install-startup       # start JARVIS automatically when you log in
+    python main.py --uninstall-startup     # stop doing that
     python main.py --list-devices          # find your mic's / speakers' index
     python main.py --input-device 3        # use a specific mic
     python main.py --llm-model qwen3:8b    # try a different Ollama model
@@ -18,11 +20,19 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
+import shutil
+import subprocess
 import sys
+import time
 import types
 import typing
+from pathlib import Path
 
 from jarvis.config import Config
+
+PROJECT_DIR = Path(__file__).resolve().parent
+STARTUP_SCRIPT = "JARVIS.cmd"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--text", action="store_true", help="type commands instead of speaking them")
     p.add_argument("--no-brain", action="store_true", help="only transcribe, don't send to the LLM")
     p.add_argument("--say", metavar="TEXT", help="speak TEXT with the current voice settings and exit")
+    p.add_argument("--install-startup", action="store_true", help="start JARVIS when you log in to Windows")
+    p.add_argument("--uninstall-startup", action="store_true", help="stop starting JARVIS at login")
     p.add_argument("--file", help="feed a WAV file instead of the microphone (for testing)")
     p.add_argument("--realtime", action="store_true", help="with --file, play at real speed")
     p.add_argument("--debug", action="store_true", help="print wake word scores and raw LLM replies")
@@ -69,6 +81,86 @@ def _parse_optional_str(value: str):
         return int(value)
     return value
 
+
+# --- Start with Windows ----------------------------------------------------
+
+def _startup_folder() -> Path:
+    return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) \
+        / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def install_startup() -> int:
+    """Put a small script in the Startup folder that runs JARVIS (minimised) at login."""
+    if sys.platform != "win32":
+        print("--install-startup only works on Windows.")
+        return 1
+    script = _startup_folder() / STARTUP_SCRIPT
+    script.write_text(
+        "@echo off\r\n"
+        "rem Starts JARVIS when you log in. Remove with: python main.py --uninstall-startup\r\n"
+        f'cd /d "{PROJECT_DIR}"\r\n'
+        f'start "JARVIS" /min "{sys.executable}" "{PROJECT_DIR / "main.py"}"\r\n',
+        encoding="utf-8",
+    )
+    print(f"JARVIS will start (minimised) every time you log in.\n  Script: {script}\n"
+          f"  Python: {sys.executable}\n"
+          "It waits for Ollama, and starts it if needed. Settings come from jarvis\\config.py.\n"
+          "To undo: python main.py --uninstall-startup")
+    return 0
+
+
+def uninstall_startup() -> int:
+    script = _startup_folder() / STARTUP_SCRIPT
+    if script.exists():
+        script.unlink()
+        print("JARVIS won't start at login any more.")
+    else:
+        print("JARVIS wasn't set to start at login.")
+    return 0
+
+
+# --- Ollama ----------------------------------------------------------------
+
+def _start_ollama() -> bool:
+    """Try to launch Ollama in the background. True if something was started."""
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama app.exe",
+        Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Ollama" / "ollama app.exe",
+    ]
+    for exe in candidates:
+        if exe.exists():
+            subprocess.Popen([str(exe)])
+            return True
+    exe = shutil.which("ollama")
+    if exe:
+        flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+        subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags)
+        return True
+    return False
+
+
+def connect_ollama(brain, wait_s: float = 90) -> None:
+    """Check Ollama is up; if it isn't, start it and wait (e.g. right after logging in)."""
+    from jarvis.brain import OllamaError
+
+    started = False
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            brain.check()
+            return
+        except OllamaError as e:
+            unreachable = str(e).startswith("Can't reach")
+            if not unreachable or time.monotonic() > deadline:
+                raise
+            if not started:
+                started = _start_ollama()
+                print("Ollama isn't running; " + ("starting it..." if started else "waiting for it..."))
+            time.sleep(2)
+
+
+# --- Building the parts ----------------------------------------------------
 
 def build_speaker(config: Config):
     """Load the Piper voice, or return None (replies are then only printed)."""
@@ -117,7 +209,7 @@ def build_brain(config: Config, debug: bool):
     )
     print(f"Connecting to Ollama ({config.llm_model})...")
     try:
-        brain.check()
+        connect_ollama(brain)
         brain.warm_up()
     except OllamaError as e:
         print(f"\n[brain] {e}")
@@ -127,19 +219,28 @@ def build_brain(config: Config, debug: bool):
     return brain
 
 
-def make_responder(brain, speaker):
-    """Returns a function that sends text to the brain, then prints and speaks the reply."""
+def make_responder(brain, speaker, fast_path: bool = True):
+    """Returns a function that handles one command, then prints and speaks the reply."""
+    from jarvis import fastpath, tools
     from jarvis.brain import OllamaError
 
     def respond(text: str) -> None:
-        try:
-            reply = brain.ask(text)
-        except OllamaError as e:
-            print(f"[brain] {e}")
-            if speaker:
-                speaker.say("Sorry, I can't reach my language model right now.")
-            return
-        print(f"JARVIS: {reply}")
+        # Simple commands ("pause", "volume 40", "what time is it") skip the LLM.
+        fast = fastpath.handle(text) if fast_path else None
+        if fast is not None:
+            reply, calls = fast
+            tools.begin_turn()
+            brain.remember(text, reply, calls)
+            print(f"JARVIS: {reply}   (fast path)")
+        else:
+            try:
+                reply = brain.ask(text)
+            except OllamaError as e:
+                print(f"[brain] {e}")
+                if speaker:
+                    speaker.say("Sorry, I can't reach my language model right now.")
+                return
+            print(f"JARVIS: {reply}")
         if speaker:
             speaker.say(reply)
 
@@ -171,6 +272,10 @@ def main() -> int:
         print("\n'>' marks the default mic, '<' the default speakers.")
         print("Pass a number with --input-device N (mic) or --output-device N (speakers).")
         return 0
+    if args.install_startup:
+        return install_startup()
+    if args.uninstall_startup:
+        return uninstall_startup()
 
     config = Config(**{f.name: getattr(args, f.name) for f in dataclasses.fields(Config)})
 
@@ -199,7 +304,7 @@ def main() -> int:
     tools.set_notifier(notify)
 
     brain = None if (args.no_brain or args.no_stt) else build_brain(config, args.debug)
-    respond = make_responder(brain, speaker) if brain else None
+    respond = make_responder(brain, speaker, config.fast_path) if brain else None
 
     try:
         if args.text:

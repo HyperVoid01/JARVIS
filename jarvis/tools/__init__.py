@@ -42,7 +42,7 @@ _REGISTRY: dict[str, Tool] = {}
 _JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 # Tools that finish later (timers) report back through this. main.py points it
-# at print + chime for now; Stage 3 will point it at text-to-speech.
+# at the Speaker so they're announced out loud.
 _notifier: Callable[[str], None] = print
 
 
@@ -54,6 +54,43 @@ def set_notifier(fn: Callable[[str], None]) -> None:
 def notify(message: str) -> None:
     _notifier(message)
 
+
+# --- Turns -----------------------------------------------------------------
+# Every user command is one "turn". Tools that need a yes from the user
+# (shutdown, force-quit) remember the turn they asked in, and only accept
+# confirmed=true from a LATER turn, so the model can't ask and answer itself.
+
+_turn = 0
+
+
+def begin_turn() -> None:
+    global _turn
+    _turn += 1
+
+
+def current_turn() -> int:
+    return _turn
+
+
+_pending: dict[str, int] = {}  # confirmation key -> turn it was asked in
+
+
+def confirmation(key: str, question: str, confirmed: bool) -> str | None:
+    """None if the user has confirmed `key`, otherwise the message telling the model to ask.
+
+    Confirmation counts only if this tool asked in the previous turn or the one before.
+    """
+    asked = _pending.get(key)
+    if confirmed and asked is not None and 0 < _turn - asked <= 2:
+        del _pending[key]
+        return None
+    _pending[key] = _turn
+    return (f"Not done yet: this needs the user's OK. Ask them exactly: \"{question}\" "
+            f"If they say yes, call this tool again with confirmed=true. "
+            f"Do not set confirmed=true until they have answered.")
+
+
+# --- Registry --------------------------------------------------------------
 
 def tool(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator: register `func` as a tool the LLM can call."""
@@ -156,4 +193,4 @@ def _parse_docstring(doc: str) -> tuple[str, dict[str, str]]:
 
 
 # Importing the modules registers their tools.
-from . import media, system, unity  # noqa: E402,F401
+from . import media, system, unity, windows  # noqa: E402,F401
