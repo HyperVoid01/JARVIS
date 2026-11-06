@@ -193,4 +193,4 @@ def _parse_docstring(doc: str) -> tuple[str, dict[str, str]]:
 
 
 # Importing the modules registers their tools.
-from . import devices, media, memory, system, unity, windows  # noqa: E402,F401
+from . import devices, media, memory, system, unity, windows, workspaces  # noqa: E402,F401

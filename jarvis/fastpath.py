@@ -134,6 +134,37 @@ def _date(m):
     return f"It's {now:%A}, {now.day} {now:%B}."
 
 
+# --- Workspaces ------------------------------------------------------------
+
+_ASK = re.compile(r'Ask them exactly: "(.+?)"')
+
+
+def _spoken(result: str) -> str:
+    """A tool result that asks the user something -> just the question."""
+    m = _ASK.search(result)
+    return m.group(1) if m else result
+
+
+@_on(r"^((ok(ay)?|right|alright|so) )?(let's|lets|let us|time to|ready to) "
+     r"(get (back )?to work|get working|get started|start working|start work|do some work|"
+     r"get busy|crack on|work|begin)( on (?P<name>.+))?$"
+     r"|^(i'm|i am|we're|we are) (going to |gonna )?(be )?working on (?P<name2>.+)$"
+     r"|^(start|open|load|launch) (up )?(my |the )?(?P<name3>.+?) (workspace|setup|work setup)$")
+def _start_work(m):
+    name = m["name"] or m["name2"] or m["name3"] or ""
+    return _spoken(_call("workspace", {"action": "start", "name": name}))
+
+
+def _workspace_answer(text: str) -> str | None:
+    """The answer to "what are we working on?" or "what should I open for X?"."""
+    from .tools import workspaces
+    hit = workspaces.answer_pending(text)
+    if hit is None:
+        return None
+    name, args = hit
+    return _spoken(_call(name, args))
+
+
 # --- Entry point -----------------------------------------------------------
 
 def normalise(text: str) -> str:
@@ -172,6 +203,9 @@ def handle(text: str) -> tuple[str, list[tuple[str, dict, str]]] | None:
     Returns None for anything that needs the LLM.
     """
     _calls.clear()
+    reply = _workspace_answer(text)  # first: it must see every command to expire its question
+    if reply is not None:
+        return reply, list(_calls)
     reply = _remember(text)
     if reply is not None:
         return reply, list(_calls)

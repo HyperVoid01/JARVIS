@@ -121,6 +121,8 @@ JARVIS: Spotify is open, sir.
 | "Lock the PC" / "Go to sleep" / "Shut down" / "Restart" / "Cancel the shutdown" | `power` |
 | "Remember that my WIL deadline is Friday" / "It moved to Monday" / "Forget my deadline" / "What do you know about me?" | `remember`, `forget` |
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
+| "Let's get to work" / "Let's work on Rat Attack" / "Add Discord to the Rat Attack workspace" | `workspace` (asks what to open the first time, then remembers) |
+| "Switch to my headset" / "Which mic are you using?" | `microphone` |
 
 After each reply, a soft tick plays and JARVIS listens for 4 seconds without the wake word, so you can keep talking:
 

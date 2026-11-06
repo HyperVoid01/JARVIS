@@ -192,16 +192,18 @@ def build_speaker(config: Config):
 def build_brain(config: Config, debug: bool):
     from jarvis import tools
     from jarvis.brain import Brain, OllamaError
-    from jarvis.tools import memory, unity
+    from jarvis.tools import memory, unity, workspaces
 
     unity.configure(project_dirs=config.unity_project_dirs, editor_root=config.unity_editor_root)
     memory_path = Path(config.memory_file)
     memory.configure(memory_path if memory_path.is_absolute() else PROJECT_DIR / memory_path,
                      user=config.user_name)
+    workspaces.configure(PROJECT_DIR / "workspaces.json")
 
     def extra_context() -> str:
         projects = ", ".join(sorted(unity.find_projects())) or "none found"
-        return f"The user's Unity projects: {projects}.\n\n{memory.prompt_block(config.user_name)}"
+        return (f"The user's Unity projects: {projects}.\n{workspaces.prompt_line()}\n\n"
+                f"{memory.prompt_block(config.user_name)}")
 
     brain = Brain(
         model=config.llm_model,
