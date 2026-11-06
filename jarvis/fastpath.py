@@ -145,11 +145,36 @@ def normalise(text: str) -> str:
     return s.strip()
 
 
+# "Remember that my favourite food is pizza" is matched on the original text, to keep its capitals.
+_REMEMBER = re.compile(
+    r"^\W*((hey )?jarvis\W+)?(please\W+)?(can you |could you )?"
+    r"(remember|note|make a note|don't forget|do not forget|keep in mind)(\s+that)?[\s,:]+(?P<fact>.+?)\W*$",
+    re.IGNORECASE,
+)
+_NOT_A_FACT = re.compile(r"^(what|when|where|who|which|how|if|whether|me|it|this|that)\b", re.IGNORECASE)
+
+
+def _remember(text: str) -> str | None:
+    m = _REMEMBER.match(text)
+    if not m or _NOT_A_FACT.match(m["fact"]) or len(m["fact"].split()) < 2:
+        return None  # "remember what I said?", "remember this" -> let the LLM ask what
+    from .tools import memory
+    result = _call("remember", {"fact": memory.to_fact(m["fact"])})
+    if result.startswith("Error"):
+        return result
+    # Read it back, so a misheard name or a wrong date gets noticed straight away.
+    return f"Noted: {memory.said_back(m['fact'])}."
+
+
 def handle(text: str) -> tuple[str, list[tuple[str, dict, str]]] | None:
     """If `text` is a simple command, carry it out and return (spoken reply, tool calls made).
 
     Returns None for anything that needs the LLM.
     """
+    _calls.clear()
+    reply = _remember(text)
+    if reply is not None:
+        return reply, list(_calls)
     s = normalise(text)
     for pattern, fn in _PATTERNS:
         m = pattern.match(s)

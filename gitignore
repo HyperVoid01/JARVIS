@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Downloaded / generated models (wake word, Piper voices)
+models/
+*.onnx
+*.tflite
+
+# Local recordings and logs
+recordings/
+*.wav
+*.log
+
+# Personal: what you've asked JARVIS to remember
+memory.json
+memory.tmp
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

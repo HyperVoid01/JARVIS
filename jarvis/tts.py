@@ -26,6 +26,10 @@ import numpy as np
 
 from .voice_fx import jarvis_fx
 
+# Piper warns about rare espeak symbols ("Missing phoneme from id map"); they're harmless.
+import logging  # noqa: E402
+logging.getLogger("piper").setLevel(logging.ERROR)
+
 _END = object()         # marks the end of one utterance in the audio queue
 _BLOCK_S = 0.05         # playback block length; stop() takes effect within this
 _SENTENCE_GAP_S = 0.12  # short pause between sentences so they don't run together

@@ -57,6 +57,9 @@ class Config:
     # Handle simple commands ("pause", "next song", "volume 40", "what time is it")
     # instantly, without the LLM. See jarvis/fastpath.py for what counts as simple.
     fast_path: bool = True
+    # Long-term memory: facts you ask JARVIS to remember, kept across restarts.
+    # Relative paths are inside the project folder. It's in .gitignore, so it never reaches GitHub.
+    memory_file: str = "memory.json"
 
     # --- Voice (text-to-speech via Piper) ---------------------------------
     tts: bool = True                 # speak replies out loud (--no-tts to only print them)

@@ -5,7 +5,8 @@ A local, offline voice assistant. Built in stages:
 - [x] **Stage 1: Ears.** Wake word ("Hey Jarvis") → record command → speech-to-text
 - [x] **Stage 2: Brain.** Local LLM (Ollama) with tool calling: opens apps, Unity projects, timers, media keys
 - [x] **Stage 3: Voice.** Spoken replies with Piper, and "Hey Jarvis" interrupts it mid-sentence
-- [ ] Stage 4: Memory + HUD
+- [x] **Stage 4a: Memory.** Remembers what you ask it to, across restarts
+- [ ] Stage 4b: HUD (on-screen overlay)
 
 ## How it works
 
@@ -47,6 +48,7 @@ Speech plays on its own threads, so JARVIS keeps listening while it talks. Talk 
 | `jarvis/tools/media.py` | Per-app playback control and system volume |
 | `jarvis/tools/windows.py` | Close / quit / switch to / minimize apps; lock, sleep, shut down |
 | `jarvis/fastpath.py` | Instant handling of simple commands, without the LLM |
+| `jarvis/tools/memory.py` | Long-term memory: remember / update / forget facts (`memory.json`) |
 | `jarvis/tools/unity.py` | Find Unity projects and open them in the right editor version |
 | `jarvis/sounds.py` | Chimes generated in code |
 
@@ -116,6 +118,7 @@ JARVIS: Spotify is open, sir.
 | "Actually make it 15" / "Cancel the pizza timer" / "Cancel all timers" | `change_timer`, `cancel_timer` |
 | "Close Discord" / "Quit Spotify" / "Switch to Chrome" / "Minimize VS Code" / "Show the desktop" / "What's open?" | `window` |
 | "Lock the PC" / "Go to sleep" / "Shut down" / "Restart" / "Cancel the shutdown" | `power` |
+| "Remember that my WIL deadline is Friday" / "It moved to Monday" / "Forget my deadline" / "What do you know about me?" | `remember`, `forget` |
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
 
 After each reply, a soft tick plays and JARVIS listens for 4 seconds without the wake word, so you can keep talking:
@@ -129,6 +132,25 @@ You:    Thanks.                         (conversation ends)
 ```
 
 Silence, or "thanks", "that's all", "no", "never mind", ends the conversation. Music stays ducked until it does. It also remembers the last few commands, so "now make it 5 minutes" works later too. That memory resets after 5 minutes of silence.
+
+### Memory
+
+Tell JARVIS to remember something and it keeps it for good, across restarts:
+
+```
+You:    Hey Jarvis, remember that my WIL deadline is this Friday.
+JARVIS: Noted, sir. Friday the 14th.
+        ...next week, after a restart...
+You:    Hey Jarvis, when's my WIL deadline?
+JARVIS: Friday 14 November.
+```
+
+- It only saves what you explicitly ask it to ("remember", "note that", "don't forget"). It never quietly collects things.
+- "Remember…" is instant (no LLM): it's rewritten in code ("my deadline is Friday" becomes "Sooriyan's deadline is on Friday 13 November 2026") and read back to you, so you can catch a misheard word or a wrong date.
+- "Friday" or "tomorrow" is saved as the real date, so it still makes sense later. A bare weekday always means an upcoming one; "next Monday" is the one after the coming Monday.
+- Saving a new value for the same thing ("my favourite food is sushi") replaces the old one.
+- "It moved to Monday" updates the old fact; "forget my deadline" removes it; "forget everything" asks first.
+- Everything is in `memory.json` in the project folder, which you can open and edit by hand. It's in `.gitignore`, so it never gets pushed to GitHub. Use `--memory-file` to keep it somewhere else.
 
 ### Closing apps, and things that ask first
 

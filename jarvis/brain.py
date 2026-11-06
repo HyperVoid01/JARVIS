@@ -43,10 +43,15 @@ Rules:
 - If a tool result says it needs the user's OK, ask that question and stop. Only call it again with confirmed=true after the user says yes; if they say no, drop it.
 - Right after a shutdown or restart was started, a bare "cancel" or "stop" means power cancel_shutdown.
 - "Close" an app means window close; "quit", "kill" or "exit" it, or closing something that hides in the tray, means window quit.
+- When the user asks you to remember, note or not forget something, call remember. If they say a remembered fact changed, call remember with replaces. If they ask you to forget something, call forget. Never say you'll remember or have forgotten something without the tool.
+- Remembered facts are written about the user in the third person. When you talk to them, say "your" and "you", never their name: "Your deadline is Monday", not "Sooriyan's deadline is Monday".
+- Questions about what you remember ("what's my deadline?", "what do you know about me?") are answered from the remembered list below. If it isn't there, say you don't have that saved.
 - If a request is unclear or no tool fits, say so in one sentence.
 - Be helpful with a dry, understated wit, like the JARVIS from Iron Man. Address the user as "sir" occasionally, not every time.
 
-Current date and time: {now}.{extra}"""
+Current date and time: {now}.
+Calendar (use it for any date; never work weekdays out yourself): {calendar}.
+"This Friday" means the next Friday on or after today; "next Friday" means the one after that.{extra}"""
 
 
 class OllamaError(RuntimeError):
@@ -238,6 +243,7 @@ class Brain:
         system = SYSTEM_PROMPT.format(
             user=self.user_name,
             now=dt.datetime.now().strftime("%A %d %B %Y, %H:%M"),
+            calendar=_calendar(),
             extra=extra,
         )
         payload = {
@@ -284,7 +290,7 @@ _NUDGE = ("(System check, not from the user: you did not call any tool, so nothi
 _ACTION_VERBS = (r"set|started|opened|launched|cancel+ed|changed|renamed|restarted|paused|"
                  r"resumed|played|skipped|muted|unmuted|turned|created|closed|searched|stopped|"
                  r"locked|minimi[sz]ed|maximi[sz]ed|switched|quit|killed|decreased|increased|"
-                 r"lowered|raised|adjusted|reduced")
+                 r"lowered|raised|adjusted|reduced|remember|noted|saved|stored|forgotten|forgot|deleted|removed|erased")
 _STATES = (r"playing|paused|open|closed|locked|minimi[sz]ed|maximi[sz]ed|muted|unmuted|"
            r"running|shutting down|restarting|signing out|going to sleep|set to|at \d+")
 _CLAIM = re.compile(
@@ -294,7 +300,8 @@ _CLAIM = re.compile(
     rf"|\b({_ACTION_VERBS})\s+(by|to)\s+\d+"
     rf"|\b(shutting down|restarting|locking|signing out)\b"
     rf"|\b(current|volume)\s+(level\s+)?(is\s+)?(at\s+)?\d+\s*(%|percent)"
-    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started|closed|switched)\b",
+    rf"|\b(keep that in mind|make a note|made a note|noted that|got it noted|in my memory)\b"
+    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started|closed|switched|noted|saved|forgotten)\b",
     re.IGNORECASE,
 )
 
@@ -302,6 +309,17 @@ _CLAIM = re.compile(
 def claims_action(text: str) -> bool:
     """True if a reply says something was done (which needs a tool call to be true)."""
     return bool(_CLAIM.search(text.strip()))
+
+
+def _calendar(days: int = 21) -> str:
+    """'Fri 6 Nov 2026 (today), Sat 7 Nov 2026, ...': small models get weekday maths wrong."""
+    today = dt.date.today()
+    out = []
+    for i in range(days):
+        d = today + dt.timedelta(days=i)
+        label = f"{d:%a} {d.day} {d:%b %Y}"
+        out.append(label + (" (today)" if i == 0 else " (tomorrow)" if i == 1 else ""))
+    return ", ".join(out)
 
 
 def shorten(text: str, max_sentences: int = 3) -> str:

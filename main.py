@@ -192,9 +192,16 @@ def build_speaker(config: Config):
 def build_brain(config: Config, debug: bool):
     from jarvis import tools
     from jarvis.brain import Brain, OllamaError
-    from jarvis.tools import unity
+    from jarvis.tools import memory, unity
 
     unity.configure(project_dirs=config.unity_project_dirs, editor_root=config.unity_editor_root)
+    memory_path = Path(config.memory_file)
+    memory.configure(memory_path if memory_path.is_absolute() else PROJECT_DIR / memory_path,
+                     user=config.user_name)
+
+    def extra_context() -> str:
+        projects = ", ".join(sorted(unity.find_projects())) or "none found"
+        return f"The user's Unity projects: {projects}.\n\n{memory.prompt_block(config.user_name)}"
 
     brain = Brain(
         model=config.llm_model,
@@ -204,7 +211,7 @@ def build_brain(config: Config, debug: bool):
         history_turns=config.history_turns,
         history_timeout_s=config.history_timeout_s,
         user_name=config.user_name,
-        extra_context=lambda: "The user's Unity projects: " + (", ".join(sorted(unity.find_projects())) or "none found") + ".",
+        extra_context=extra_context,
         debug=debug,
     )
     print(f"Connecting to Ollama ({config.llm_model})...")
@@ -216,6 +223,8 @@ def build_brain(config: Config, debug: bool):
         sys.exit(1)
     print(f"Brain ready with {len(tools.all_tools())} tools: "
           + ", ".join(t.name for t in tools.all_tools()))
+    facts = len(memory.load())
+    print(f"Memory: {facts} saved fact{'s' * (facts != 1)} ({memory_path.name})")
     return brain
 
 
