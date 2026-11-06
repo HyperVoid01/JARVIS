@@ -228,12 +228,29 @@ def build_brain(config: Config, debug: bool):
     return brain
 
 
-def make_responder(brain, speaker, fast_path: bool = True):
+def build_hud(config: Config):
+    """Start the on-screen HUD, or a do-nothing stand-in if it's off or can't open."""
+    from jarvis.hud import Hud, NullHud
+
+    if not config.hud:
+        return NullHud()
+    try:
+        return Hud(position=config.hud_position, scale=config.hud_scale).start()
+    except Exception as e:
+        print(f"[hud] couldn't open the HUD ({type(e).__name__}: {e}); carrying on without it. (--no-hud hides this)")
+        return NullHud()
+
+
+def make_responder(brain, speaker, fast_path: bool = True, hud=None):
     """Returns a function that handles one command, then prints and speaks the reply."""
     from jarvis import fastpath, tools
     from jarvis.brain import OllamaError
 
+    from jarvis.hud import NullHud
+    hud = hud or NullHud()
+
     def respond(text: str) -> None:
+        hud.heard(text)
         # Simple commands ("pause", "volume 40", "what time is it") skip the LLM.
         fast = fastpath.handle(text) if fast_path else None
         if fast is not None:
@@ -242,14 +259,16 @@ def make_responder(brain, speaker, fast_path: bool = True):
             brain.remember(text, reply, calls)
             print(f"JARVIS: {reply}   (fast path)")
         else:
+            hud.state("thinking")
             try:
                 reply = brain.ask(text)
             except OllamaError as e:
                 print(f"[brain] {e}")
-                if speaker:
-                    speaker.say("Sorry, I can't reach my language model right now.")
-                return
-            print(f"JARVIS: {reply}")
+                reply = "Sorry, I can't reach my language model right now."
+            else:
+                print(f"JARVIS: {reply}")
+        hud.reply(reply)
+        hud.state("idle")  # the HUD switches to "speaking" by itself while the reply plays
         if speaker:
             speaker.say(reply)
 
@@ -300,11 +319,16 @@ def main() -> int:
 
     from jarvis import sounds, tools
 
+    hud = build_hud(config)
+    hud.state("thinking", "starting up")
     speaker = None if (args.no_brain or args.no_stt) else build_speaker(config)
+    if speaker:
+        hud.attach_speaker(speaker)
 
     # Timers and other delayed tools report back here.
     def notify(message: str) -> None:
         print(f"\nJARVIS: {message}")
+        hud.reply(message)
         if speaker:
             speaker.say(message, sound=sounds.ALERT if config.chime else None)
         elif config.chime:
@@ -313,22 +337,24 @@ def main() -> int:
     tools.set_notifier(notify)
 
     brain = None if (args.no_brain or args.no_stt) else build_brain(config, args.debug)
-    respond = make_responder(brain, speaker, config.fast_path) if brain else None
+    respond = make_responder(brain, speaker, config.fast_path, hud) if brain else None
 
     try:
         if args.text:
             if respond is None:
                 print("--text needs the brain; drop --no-brain.")
                 return 1
+            hud.state("idle")
             run_text_mode(respond, speaker)
             return 0
-        return run_voice_mode(config, args, respond, speaker)
+        return run_voice_mode(config, args, respond, speaker, hud)
     finally:
         if speaker:
             speaker.close()
+        hud.close()
 
 
-def run_voice_mode(config: Config, args, respond, speaker) -> int:
+def run_voice_mode(config: Config, args, respond, speaker, hud=None) -> int:
     # Imports are deferred so --help, --list-devices and --text start quickly.
     from jarvis.audio import FileStream, MicStream
     from jarvis.pipeline import VoicePipeline
@@ -378,7 +404,7 @@ def run_voice_mode(config: Config, args, respond, speaker) -> int:
             ducker = None
 
     pipeline = VoicePipeline(config, source, transcriber, speaker=speaker, ducker=ducker,
-                             debug=args.debug)
+                             hud=hud, debug=args.debug)
     try:
         pipeline.run(on_command)
         if speaker:

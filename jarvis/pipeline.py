@@ -81,6 +81,7 @@ class VoicePipeline:
         transcriber: Transcriber | None,
         speaker: Speaker | None = None,
         ducker: Ducker | None = None,
+        hud=None,
         debug: bool = False,
     ):
         self.config = config
@@ -88,6 +89,10 @@ class VoicePipeline:
         self.transcriber = transcriber
         self.speaker = speaker
         self.ducker = ducker
+        if hud is None:
+            from .hud import NullHud
+            hud = NullHud()
+        self.hud = hud
         self.debug = debug
 
         self.wake = WakeWordDetector(
@@ -119,6 +124,7 @@ class VoicePipeline:
 
     def run(self, on_command: Callable[[str, Transcript | None], None]) -> None:
         print(f'Listening for "{self.wake.name}"...  (Ctrl+C to quit)')
+        self.hud.state("idle")
         cooldown = 0
         was_talking = False
         follow_up = False  # a command was just handled; listen again once the reply ends
@@ -157,6 +163,7 @@ class VoicePipeline:
                     if self.interrupter.update(chunk, self.speaker.playback_rms()):
                         speech = self.interrupter.take()
                         self.speaker.stop()
+                        self.hud.state("listening")
                         print("\n[interrupt] you spoke over JARVIS; listening")
                         follow_up = self._listen_and_handle(on_command, preroll=speech)
                         self.interrupter.reset()
@@ -181,6 +188,7 @@ class VoicePipeline:
                     if self.interrupter:
                         self.interrupter.reset()
                     print(f"\n[wake] interrupted (score {self.wake.last_score:.2f})")
+                    self.hud.state("listening")
                 else:
                     detected = self.wake.process(chunk)
                     if self.debug and self.wake.last_score > 0.1:
@@ -189,6 +197,7 @@ class VoicePipeline:
                     if not detected:
                         continue
                     print(f"\n[wake] heard \"{self.wake.name}\" (score {self.wake.last_score:.2f})")
+                    self.hud.state("listening")
 
                 if self.ducker:
                     self.ducker.duck()
@@ -205,6 +214,7 @@ class VoicePipeline:
         # model's buffer so it can't re-trigger on old audio.
         self.source.clear()
         self.wake.reset()
+        self.hud.state("idle")  # shows "speaking" by itself while a reply plays
         if not self._talking():
             print(f'\nListening for "{self.wake.name}"...')
         return self._cooldown_chunks
@@ -231,6 +241,7 @@ class VoicePipeline:
             self.source.clear()
             self.wake.reset()
             print(f"[follow-up] listening for {self.config.follow_up_s:.0f}s (no wake word needed)")
+            self.hud.state("follow_up")
         elif self.config.chime:
             sounds.play(sounds.WAKE)
 
@@ -266,6 +277,7 @@ class VoicePipeline:
             on_command("", None)
             return False
         print("[stt] transcribing...")
+        self.hud.state("transcribing")
         result = self.transcriber.transcribe(audio)
         text = clean_command(result.text)
         if not text:

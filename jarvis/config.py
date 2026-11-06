@@ -98,6 +98,13 @@ class Config:
     unity_project_dirs: list[str] | None = None
     unity_editor_root: str = "C:/Program Files/Unity/Hub/Editor"
 
+    # --- HUD --------------------------------------------------------------
+    # Always-on-top overlay: an arc-reactor ring showing what JARVIS is doing,
+    # plus what it heard and said. Mouse clicks go straight through it.
+    hud: bool = True
+    hud_position: str = "bottom-right"  # bottom-right / bottom-left / top-right / top-left
+    hud_scale: float = 1.0              # 1.25 = 25% bigger
+
     # --- Feedback ---------------------------------------------------------
     chime: bool = True               # play a sound when the wake word is heard
     save_recordings: bool = False    # write each command to recordings/*.wav

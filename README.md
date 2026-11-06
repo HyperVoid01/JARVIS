@@ -6,7 +6,7 @@ A local, offline voice assistant. Built in stages:
 - [x] **Stage 2: Brain.** Local LLM (Ollama) with tool calling: opens apps, Unity projects, timers, media keys
 - [x] **Stage 3: Voice.** Spoken replies with Piper, and "Hey Jarvis" interrupts it mid-sentence
 - [x] **Stage 4a: Memory.** Remembers what you ask it to, across restarts
-- [ ] Stage 4b: HUD (on-screen overlay)
+- [x] **Stage 4b: HUD.** Always-on-top arc-reactor overlay showing what it's doing, heard and said
 
 ## How it works
 
@@ -50,6 +50,7 @@ Speech plays on its own threads, so JARVIS keeps listening while it talks. Talk 
 | `jarvis/fastpath.py` | Instant handling of simple commands, without the LLM |
 | `jarvis/tools/memory.py` | Long-term memory: remember / update / forget facts (`memory.json`) |
 | `jarvis/tools/unity.py` | Find Unity projects and open them in the right editor version |
+| `jarvis/hud.py` | The on-screen HUD (tkinter, click-through, always on top) |
 | `jarvis/sounds.py` | Chimes generated in code |
 
 Everything runs locally. No API keys and no audio leaves your PC.
@@ -132,6 +133,27 @@ You:    Thanks.                         (conversation ends)
 ```
 
 Silence, or "thanks", "that's all", "no", "never mind", ends the conversation. Music stays ducked until it does. It also remembers the last few commands, so "now make it 5 minutes" works later too. That memory resets after 5 minutes of silence.
+
+### HUD
+
+A small overlay sits in the bottom-right corner, above the taskbar. The ring shows what JARVIS is doing at a glance:
+
+| Ring | Means |
+|---|---|
+| Dim, turning slowly | Waiting for "Hey Jarvis" (the text panel tucks away after a few seconds) |
+| Bright cyan, pulsing | Listening to you |
+| Soft cyan, "GO AHEAD" | Follow-up window: talk without the wake word |
+| Pale blue | Transcribing |
+| Amber, spinning fast | Thinking |
+| Cyan, glowing with its voice | Speaking |
+
+Next to it, the panel shows what it heard and its reply. Clicks go straight through it, so it never blocks anything, and it stays out of Alt+Tab and the taskbar.
+
+```cmd
+python main.py --hud-position top-right    # or bottom-left / top-left
+python main.py --hud-scale 1.25            # bigger
+python main.py --no-hud                    # turn it off
+```
 
 ### Memory
 
