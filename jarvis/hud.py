@@ -32,6 +32,7 @@ STATES: dict[str, tuple[str, str, float, float]] = {
     "transcribing": ("TRANSCRIBING", "#8fd9ff", 3.5, 0.75),
     "thinking":     ("THINKING",     "#ffb347", 6.0, 0.90),
     "speaking":     ("SPEAKING",     "#4ff3ff", 1.5, 0.60),
+    "paused":       ("PAUSED",       "#5b6b70", 0.15, 0.10),
 }
 
 _KEY = "#010203"        # drawn in this colour = see-through (Windows colour key)

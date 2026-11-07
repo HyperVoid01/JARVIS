@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Callable
@@ -118,6 +119,9 @@ class VoicePipeline:
                 debug=debug,
             )
         self._cooldown_chunks = int(config.wake_cooldown_s * 1000 / CHUNK_MS)
+        # Set from other threads (the tray icon): stop listening for a while, or for good.
+        self.paused = threading.Event()
+        self.stopped = threading.Event()
         # MicStream bumps this when the mic is switched; FileStream doesn't have it.
         self._source_generation = getattr(source, "generation", 0)
 
@@ -131,11 +135,26 @@ class VoicePipeline:
         was_talking = False
         follow_up = False  # a command was just handled; listen again once the reply ends
 
+        was_paused = False
         try:
             while True:
                 chunk = self.source.read()
-                if chunk is None:
-                    return  # end of file in test mode
+                if chunk is None or self.stopped.is_set():
+                    return  # end of file in test mode, or Quit from the tray
+
+                # Paused from the tray: the mic stays open but nothing it hears is used.
+                if self.paused.is_set():
+                    if not was_paused:
+                        was_paused, follow_up = True, False
+                        print("[paused] not listening")
+                        self.hud.state("paused")
+                    continue
+                if was_paused:
+                    was_paused = False
+                    self.source.clear()
+                    self.wake.reset()
+                    self.hud.state("idle")
+                    print(f'[resumed] listening for "{self.wake.name}"')
 
                 talking = self._talking()
 

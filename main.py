@@ -5,8 +5,9 @@
     python main.py --no-tts                # print replies instead of speaking them
     python main.py --no-brain              # voice -> text only, no LLM (Stage 1 behaviour)
     python main.py --say "Hello, sir."     # test the voice and exit
-    python main.py --install-startup       # start JARVIS automatically when you log in
+    python main.py --install-startup       # start JARVIS (in the tray, no window) when you log in
     python main.py --uninstall-startup     # stop doing that
+    python main.py --background            # run now the way login does: tray icon, log in jarvis.log
     python main.py --list-devices          # list your microphones and speakers
     python main.py --input-device 3        # use a specific mic
     python main.py --llm-model qwen3:8b    # try a different Ollama model
@@ -32,7 +33,10 @@ from pathlib import Path
 from jarvis.config import Config
 
 PROJECT_DIR = Path(__file__).resolve().parent
-STARTUP_SCRIPT = "JARVIS.cmd"
+STARTUP_SCRIPT = "JARVIS.cmd"   # the old way of starting at login; removed by --install-startup
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_VALUE = "JARVIS"
+LOG_PATH = PROJECT_DIR / "jarvis.log"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--say", metavar="TEXT", help="speak TEXT with the current voice settings and exit")
     p.add_argument("--install-startup", action="store_true", help="start JARVIS when you log in to Windows")
     p.add_argument("--uninstall-startup", action="store_true", help="stop starting JARVIS at login")
+    p.add_argument("--background", action="store_true",
+                   help="no console: tray icon, output to jarvis.log, one copy at a time (used at login)")
     p.add_argument("--file", help="feed a WAV file instead of the microphone (for testing)")
     p.add_argument("--realtime", action="store_true", help="with --file, play at real speed")
     p.add_argument("--debug", action="store_true", help="print wake word scores and raw LLM replies")
@@ -89,33 +95,73 @@ def _startup_folder() -> Path:
         / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 
+def _startup_command() -> str:
+    """pythonw.exe (no console window) running main.py in background mode."""
+    exe = Path(sys.executable)
+    pythonw = exe.with_name("pythonw.exe")
+    return f'"{pythonw if pythonw.exists() else exe}" "{PROJECT_DIR / "main.py"}" --background'
+
+
+def relaunch_detached() -> int:
+    """Start this same command under pythonw.exe with no window, and return to the prompt."""
+    exe = Path(sys.executable)
+    pythonw = exe.with_name("pythonw.exe")
+    flags = 0
+    if sys.platform == "win32":
+        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen(
+        [str(pythonw if pythonw.exists() else exe), str(PROJECT_DIR / "main.py"), *sys.argv[1:]],
+        cwd=PROJECT_DIR, env={**os.environ, "JARVIS_DETACHED": "1"}, creationflags=flags,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+    )
+    print("JARVIS is running in the background: look for the ring in the system tray.\n"
+          f"You can close this window. Log: {LOG_PATH}")
+    return 0
+
+
 def install_startup() -> int:
-    """Put a small script in the Startup folder that runs JARVIS (minimised) at login."""
+    """Start JARVIS in the background at login, through Windows' per-user Run list.
+
+    That's the same list Task Manager's Startup tab shows, so JARVIS can also be
+    switched off there. No console window: it lives in the tray and logs to jarvis.log.
+    """
     if sys.platform != "win32":
         print("--install-startup only works on Windows.")
         return 1
-    script = _startup_folder() / STARTUP_SCRIPT
-    script.write_text(
-        "@echo off\r\n"
-        "rem Starts JARVIS when you log in. Remove with: python main.py --uninstall-startup\r\n"
-        f'cd /d "{PROJECT_DIR}"\r\n'
-        f'start "JARVIS" /min "{sys.executable}" "{PROJECT_DIR / "main.py"}"\r\n',
-        encoding="utf-8",
-    )
-    print(f"JARVIS will start (minimised) every time you log in.\n  Script: {script}\n"
-          f"  Python: {sys.executable}\n"
-          "It waits for Ollama, and starts it if needed. Settings come from jarvis\\config.py.\n"
-          "To undo: python main.py --uninstall-startup")
+    import winreg
+
+    command = _startup_command()
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, command)
+    old = _startup_folder() / STARTUP_SCRIPT
+    if old.exists():
+        old.unlink()  # the old minimised-console script: two would start two JARVISes
+        print(f"Removed the old startup script ({old.name}).")
+    print("JARVIS will start in the background every time you log in.\n"
+          f"  Command: {command}\n"
+          f"  Log:     {LOG_PATH}\n"
+          "It shows up as a ring in the system tray (click ^ if it's hidden): right-click it to\n"
+          "pause, open the log, restart or quit. It also appears in Task Manager > Startup apps.\n"
+          "To undo: python main.py --uninstall-startup\n"
+          "To start it now without logging out: python main.py --background")
     return 0
 
 
 def uninstall_startup() -> int:
-    script = _startup_folder() / STARTUP_SCRIPT
-    if script.exists():
-        script.unlink()
-        print("JARVIS won't start at login any more.")
-    else:
-        print("JARVIS wasn't set to start at login.")
+    removed = False
+    if sys.platform == "win32":
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.DeleteValue(key, RUN_VALUE)
+                removed = True
+        except FileNotFoundError:
+            pass
+    old = _startup_folder() / STARTUP_SCRIPT
+    if old.exists():
+        old.unlink()
+        removed = True
+    print("JARVIS won't start at login any more." if removed else "JARVIS wasn't set to start at login.")
     return 0
 
 
@@ -360,6 +406,20 @@ def main() -> int:
     if args.uninstall_startup:
         return uninstall_startup()
 
+    # Started at login (or with pythonw): no console, so log to a file and allow one copy only.
+    from jarvis import background
+    if args.background and background.has_console() and not os.environ.get("JARVIS_DETACHED"):
+        # Typed into cmd: run it detached instead, or closing the window would close JARVIS too.
+        return relaunch_detached()
+    log_path = None
+    if args.background or not background.has_console():
+        args.background = True
+        os.chdir(PROJECT_DIR)  # login starts us somewhere else; relative paths must still work
+        log_path = background.log_to_file(LOG_PATH)
+    if not background.single_instance(wait_s=15 if args.background else 0):
+        print("JARVIS is already running" + (" (look for the ring in the system tray)." if sys.platform == "win32" else "."))
+        return 1
+
     config = Config(**{f.name: getattr(args, f.name) for f in dataclasses.fields(Config)})
 
     if args.say:
@@ -406,14 +466,14 @@ def main() -> int:
             hud.state("idle")
             run_text_mode(respond, speaker)
             return 0
-        return run_voice_mode(config, args, respond, speaker, hud)
+        return run_voice_mode(config, args, respond, speaker, hud, log_path)
     finally:
         if speaker:
             speaker.close()
         hud.close()
 
 
-def run_voice_mode(config: Config, args, respond, speaker, hud=None) -> int:
+def run_voice_mode(config: Config, args, respond, speaker, hud=None, log_path=None) -> int:
     # Imports are deferred so --help, --list-devices and --text start quickly.
     from jarvis.audio import FileStream, MicStream
     from jarvis.pipeline import VoicePipeline
@@ -445,14 +505,7 @@ def run_voice_mode(config: Config, args, respond, speaker, hud=None) -> int:
             config.chime = False  # chimes would overlap when running faster than real time
     else:
         from jarvis.tools import devices
-        mic = pick_microphone(config)
-        try:
-            source = MicStream(device=mic)
-        except Exception as e:
-            if mic is None:
-                raise
-            print(f"[audio] couldn't open {devices.device_name(mic)} ({e}); using the Windows default")
-            source = MicStream(device=None)
+        source = open_microphone(config, wait=args.background)
         devices.set_stream(source)  # lets the microphone tool switch it live
         print(f"Microphone: {devices.device_name(source.device)}")
 
@@ -474,6 +527,33 @@ def run_voice_mode(config: Config, args, respond, speaker, hud=None) -> int:
 
     pipeline = VoicePipeline(config, source, transcriber, speaker=speaker, ducker=ducker,
                              hud=hud, debug=args.debug)
+
+    tray = None
+    if args.background and not args.file:
+        from jarvis.tray import Tray
+
+        def pause(paused: bool) -> None:
+            (pipeline.paused.set if paused else pipeline.paused.clear)()
+            if paused and speaker:
+                speaker.stop()
+
+        def quit_jarvis() -> None:
+            print("[tray] quitting")
+            if speaker:
+                speaker.stop()
+            pipeline.stopped.set()
+
+        def restart() -> None:
+            print("[tray] restarting")
+            from jarvis import background
+            subprocess.Popen([sys.executable, str(PROJECT_DIR / "main.py"), *sys.argv[1:]], cwd=PROJECT_DIR,
+                             env={**os.environ, "JARVIS_DETACHED": "1"},
+                             creationflags=0x00000008 if sys.platform == "win32" else 0)
+            background.release_instance()  # the new copy waits for this
+            quit_jarvis()
+
+        tray = Tray(pause, quit_jarvis, restart, log_path, PROJECT_DIR).start()
+
     try:
         pipeline.run(on_command)
         if speaker:
@@ -482,7 +562,53 @@ def run_voice_mode(config: Config, args, respond, speaker, hud=None) -> int:
         print("\nShutting down.")
     finally:
         source.close()
+        if tray:
+            tray.stop()
     return 0
+
+
+def open_microphone(config: Config, wait: bool = False):
+    """Open the saved mic (or --input-device, or the default).
+
+    Right after logging in, a Bluetooth headset can take a few seconds to connect
+    and audio devices can still be starting, so with `wait` it keeps trying for a while.
+    """
+    from jarvis.audio import MicStream
+    from jarvis.tools import devices
+
+    deadline = time.monotonic() + (60 if wait else 0)
+    saved = devices.load_settings().get("microphone") if config.input_device is None else None
+    while True:
+        mic = pick_microphone(config)
+        if saved and mic is None and wait and time.monotonic() < deadline - 40:
+            # The saved mic isn't connected yet: give it up to 20 seconds before using the default.
+            _refresh_audio_devices()
+            time.sleep(2)
+            continue
+        try:
+            return MicStream(device=mic)
+        except Exception as e:
+            if mic is not None:
+                print(f"[audio] couldn't open {devices.device_name(mic)} ({e}); using the Windows default")
+                try:
+                    return MicStream(device=None)
+                except Exception as e2:
+                    e = e2
+            if time.monotonic() > deadline:
+                raise
+            print(f"[audio] no microphone yet ({e}); trying again")
+            _refresh_audio_devices()
+            time.sleep(3)
+
+
+def _refresh_audio_devices() -> None:
+    """PortAudio lists devices once at start; make it look again (a headset may have connected)."""
+    try:
+        import sounddevice as sd
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

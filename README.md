@@ -198,9 +198,26 @@ Simple commands skip the LLM entirely and happen straight away: pause, play, nex
 ```cmd
 python main.py --install-startup      # run this once, from the activated venv
 python main.py --uninstall-startup    # to undo it
+python main.py --background           # run now exactly as it will at login
 ```
 
-This puts `JARVIS.cmd` in your Startup folder, which opens JARVIS in a minimised window every time you log in, using your settings from `jarvis/config.py`. If Ollama isn't running yet, JARVIS starts it and waits for it. To stop JARVIS, close that window or press Ctrl+C in it.
+`--background` typed into cmd starts JARVIS detached and gives you the prompt back, so you can close the window.
+
+At login JARVIS starts with no window: it shows up as a **ring in the system tray** (click `^` if it's hidden), cyan while listening and grey while paused. Right-click it for:
+
+| Menu | Does |
+|---|---|
+| Pause listening / Resume listening | Ignores the mic until you resume (also stops a reply mid-sentence). Clicking the icon does the same. |
+| Open log | `jarvis.log` in the project folder: everything the console would have shown, with times |
+| Open JARVIS folder | The project folder |
+| Restart | Starts a fresh JARVIS (e.g. after updating files), then quits this one |
+| Quit | Stops JARVIS until you next log in |
+
+Details:
+- Only one JARVIS runs at a time. Running `python main.py` while the background one is running says so and exits: quit it from the tray first.
+- If Ollama isn't running yet, JARVIS starts it and waits. If your saved mic is a Bluetooth headset that hasn't connected yet, it waits up to 20 seconds for it, then uses the default mic.
+- It's registered in Windows' per-user startup list, so it also appears (and can be turned off) in Task Manager > Startup apps.
+- `jarvis.log` is restarted as `jarvis.old.log` when it passes 2 MB.
 
 ### Unity projects
 
@@ -295,6 +312,14 @@ python main.py --text                     # type commands straight into the brai
 python main.py --file test.wav            # replay a recording (make one with --save-recordings)
 python main.py --no-stt --debug           # tune wake word / VAD without loading Whisper
 ```
+
+### Tests
+
+```cmd
+python -m unittest discover tests
+```
+
+About 60 tests replay real sessions (including the misheard words) against a fake PC: files, notes, workspaces, the daily question, reminders, About Me, microphone names, and the guards against the model's slips (broken tool calls, claimed actions, replies in Chinese). They need no mic, Whisper, Ollama or Windows and take a few seconds, so run them after changing anything. When JARVIS gets something wrong, add the conversation as a test in `tests/` before fixing it; `tests/support.py` explains how.
 
 ### GPU usage
 

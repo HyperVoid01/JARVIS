@@ -119,6 +119,13 @@ def _quiet() -> bool:
 
 _pending: dict | None = None
 _just_answered = False   # the last reply answered one of our questions: don't stack another
+_busy_turn = False       # the user is starting work: a reminder is fine, a chatty question isn't
+
+
+def busy() -> None:
+    """Called by tools that start real work (opening a workspace)."""
+    global _busy_turn
+    _busy_turn = True
 
 
 def _set_pending(kind: str, **data) -> None:
@@ -169,6 +176,9 @@ def answer_pending(text: str) -> str | None:
         return None
 
     # p["kind"] == "question"
+    if said.endswith("?"):
+        _skip(p["id"], days=3)  # they asked something instead of answering
+        return None
     if _SKIP.match(said) and len(said.split()) <= 4:
         _skip(p["id"], days=SKIP_DAYS)
         _just_answered = True
@@ -198,10 +208,14 @@ def _answer_sentence(template: str, said: str) -> str:
     s = re.sub(r"[\s,]+(usually|mostly|probably|i think|i guess|normally|really|for now)$", "", s, flags=re.I)
     if re.match(r"^(my|i|i'm|i've|i'd)\b", s, re.I) and len(s.split()) > 3:
         return s  # they answered in a full sentence already
-    rest = s.split()[1:]
-    if s[:1].isupper() and not s[:2].isupper() and not re.match(r"^[A-Z][a-z]+[A-Z]", s) \
-            and all(w[:1].islower() or not w[:1].isalpha() for w in rest):
-        s = s[:1].lower() + s[1:]  # "Around nine" -> "around nine"; "Rat Attack", "WIL" stay as said
+    words = s.split()
+    common_start = words and words[0].lower() in {"the", "a", "an", "around", "about", "maybe", "at", "in",
+                                                  "on", "next", "this", "some", "probably", "usually"}
+    all_lower_after = all(w[:1].islower() or not w[:1].isalpha() for w in words[1:])
+    all_caps_word = bool(re.match(r"^[A-Z]{2,}\b", s))   # "WIL", "POE"
+    if s[:1].isupper() and not all_caps_word and not re.match(r"^[A-Z][a-z]+[A-Z]", s) \
+            and (common_start or all_lower_after):
+        s = s[:1].lower() + s[1:]  # "The WIL demo" -> "the WIL demo"; "Rat Attack", "WIL" stay as said
     return template.format(a=s)
 
 
@@ -371,6 +385,7 @@ def start_reminder_thread(notify, busy=lambda: False) -> None:
 # --- 3. Habits ---------------------------------------------------------------
 
 def record_workspace(name: str) -> None:
+    busy()
     now = dt.datetime.now()
     state = _load()
     log = state.setdefault("workspaces", [])
@@ -451,9 +466,13 @@ def after_reply(text: str, reply: str) -> str:
     if worth_remembering(text) and not _already_known(text):
         _set_pending("offer", said=text.strip())
         return "Want me to remember that?"
+    global _busy_turn
+    busy_now, _busy_turn = _busy_turn, False
     reminder = due_reminder() if not _quiet() else None
     if reminder:
         return reminder
+    if busy_now:
+        return ""
     return _daily_question() or ""
 
 

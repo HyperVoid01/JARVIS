@@ -26,3 +26,7 @@ requests>=2.31
 
 # Reading PDFs aloud ("what's in my Dream Planner?")
 pypdf>=5.0
+
+# Tray icon when JARVIS runs in the background (--background / --install-startup)
+pystray>=0.19; sys_platform == "win32"
+Pillow>=10.0; sys_platform == "win32"
