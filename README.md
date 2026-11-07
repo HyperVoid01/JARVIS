@@ -123,6 +123,13 @@ JARVIS: Spotify is open, sir.
 | "What Unity projects do I have?" / "Open Rat Attack" | `list_unity_projects`, `open_unity_project` |
 | "Let's get to work" / "Let's work on Rat Attack" / "Add Discord to the Rat Attack workspace" | `workspace` (asks what to open the first time, then remembers) |
 | "Switch to my headset" / "Which mic are you using?" | `microphone` |
+| "Open my Downloads" / "Open the RatController script" / "Where's my WIL report?" / "What's in my Desktop?" | `files` (Desktop, Documents, Downloads, `D:\UNITY Projects`; change with `--file-dirs`) |
+| "Read me my ideas note" / "What does my WIL report say?" | `files` read (text, code and Word files) |
+| "Make a note called ideas: rat boss" / "Add a combo meter to my ideas note" | `files` note (in `Documents\JARVIS Notes`, only ever added to) |
+| "Ask me something" / "Stop asking me questions" | One question a day about you, saved to memory (`--no-daily-question` to turn off) |
+| "I've got a demo on Friday" | "Want me to remember that?" (nothing is saved without a yes) |
+| (automatic) | Remembered deadlines mentioned two days ahead (`--no-deadline-reminders` to turn off); "Rat Attack again?" when you usually open it |
+| "What's my student number?" | Answered from files you put in `Documents\JARVIS Notes\About Me` |
 
 After each reply, a soft tick plays and JARVIS listens for 4 seconds without the wake word, so you can keep talking:
 

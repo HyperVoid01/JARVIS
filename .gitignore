@@ -15,6 +15,15 @@ recordings/
 *.wav
 *.log
 
+# Personal data saved by JARVIS. Never commit these: the repo is public.
+memory.json
+memory.tmp
+user_settings.json
+workspaces.json
+workspaces.tmp
+learning.json
+learning.tmp
+
 # Editors / OS
 .vscode/
 .idea/

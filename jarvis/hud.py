@@ -18,6 +18,7 @@ through a queue, so state()/heard()/reply() are safe to call from any thread.
 from __future__ import annotations
 
 import math
+import gc
 import queue
 import sys
 import threading
@@ -158,11 +159,13 @@ class Hud:
         self._ready = threading.Event()
         self._error: Exception | None = None
         self._speaker = None
+        self._thread: threading.Thread | None = None
 
     # --- Public API (any thread) ------------------------------------------
 
     def start(self) -> "Hud":
-        threading.Thread(target=self._run, daemon=True, name="hud").start()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="hud")
+        self._thread.start()
         self._ready.wait(5)
         if self._error:
             raise self._error
@@ -182,6 +185,10 @@ class Hud:
 
     def close(self) -> None:
         self._queue.put(("close", None))
+        # Wait for the HUD thread to tear Tk down itself. If Python exits first,
+        # Tk is cleaned up from the main thread ("Tcl_AsyncDelete: ... wrong thread").
+        if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2)
 
     # --- HUD thread ----------------------------------------------------------
 
@@ -252,7 +259,15 @@ class Hud:
             root.after(33, frame)
 
         frame()
-        root.mainloop()
+        try:
+            root.mainloop()
+        finally:
+            # `frame` re-schedules itself, so it refers to itself: a reference cycle that
+            # keeps root and canvas alive. Left to the garbage collector, they'd be freed
+            # later on the main thread, which Tk reports as "Tcl_AsyncDelete: async
+            # handler deleted by the wrong thread". Break the cycle and free them here.
+            frame = canvas = view = root = None
+            gc.collect()
 
 
 # --- Windows helpers --------------------------------------------------------

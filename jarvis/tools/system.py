@@ -208,7 +208,13 @@ def open_app(name: str) -> str:
     if project:
         return unity.open_unity_project(project)
 
-    return f"Error: couldn't find an app or Unity project called '{name}' on this PC."
+    # 6. Maybe it's a file or folder ("open my WIL report"). Only exact-ish matches.
+    from . import files
+    path = files.locate(name, strict=True)
+    if path:
+        return files.open_path(path)
+
+    return f"Error: couldn't find an app, Unity project or file called '{name}' on this PC."
 
 
 # --- Web -------------------------------------------------------------------

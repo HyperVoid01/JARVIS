@@ -98,6 +98,13 @@ class Config:
     # --- Tools ------------------------------------------------------------
     # Folders to search for Unity projects. None = Documents, Desktop, D:\ and a few common spots.
     unity_project_dirs: list[str] | None = None
+    # Extra folders the files tool may search, besides Desktop, Documents and Downloads.
+    # None = D:/UNITY Projects (see DEFAULT_EXTRA_DIRS in jarvis/tools/files.py).
+    file_dirs: list[str] | None = None
+
+    # --- Getting to know you (see jarvis/learning.py) -------------------------
+    daily_question: bool = True      # one question about you a day, after a reply that went well
+    deadline_reminders: bool = True  # mention remembered deadlines two days ahead
     unity_editor_root: str = "C:/Program Files/Unity/Hub/Editor"
 
     # --- HUD --------------------------------------------------------------

@@ -166,9 +166,15 @@ def resolve(phrase: str, workspace: str) -> dict:
         return {"type": "url", "target": _SITES[low], "label": phrase}
     if re.match(r"^(https?://)?[\w-]+(\.[\w-]+)+(/\S*)?$", low):
         return {"type": "url", "target": phrase, "label": phrase}
+    if re.search(r"\b(folder|file|doc|document|notes?|report|pdf|spreadsheet|slides|script|essay|brief|assignment)\b", low):
+        from . import files
+        path = files.locate(phrase)
+        if path:
+            return {"type": "path", "target": str(path), "label": phrase}
     other = _unity().match_project(phrase)
     if other and len(low) > 3:
-        return {"type": "unity", "target": other, "label": f"{other} in Unity"}
+        label = "Unity" if other == project else f"{other} in Unity"
+        return {"type": "unity", "target": other, "label": label}
     return {"type": "app", "target": phrase, "label": phrase}
 
 
@@ -178,13 +184,30 @@ def _open(item: dict) -> str:
         return _unity().open_unity_project(item["target"])
     if item["type"] == "url":
         return system.open_website(item["target"])
+    if item["type"] == "path":
+        from . import files
+        path = Path(item["target"])
+        if not path.exists():
+            return f"Error: {path.name} isn't there any more."
+        return files.open_path(path)
     return system.open_app(item["target"])
+
+
+def _dedupe(items: list[dict]) -> list[dict]:
+    """Drop repeats: "the Racer, Unity project" names the same project twice."""
+    seen, out = set(), []
+    for i in items:
+        key = (i["type"], i["target"].lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(i)
+    return out
 
 
 def _open_all(items: list[dict]) -> tuple[list[dict], list[tuple[dict, str]]]:
     """Open items (Unity first, it's the slowest). Returns (opened, [(failed, error)])."""
     opened, failed = [], []
-    for item in sorted(items, key=lambda i: i["type"] != "unity"):
+    for item in sorted(_dedupe(items), key=lambda i: i["type"] != "unity"):
         result = _open(item)
         if result.startswith("Error"):
             failed.append((item, result))
@@ -249,6 +272,9 @@ def answer_pending(text: str) -> tuple[str, dict] | None:
         return None
 
     if p["kind"] == "project":
+        if p.get("usual") and re.match(r"^\W*(yes|yeah|yep|yup|sure|same|again|that one|ok(ay)?|correct|"
+                                         r"same as (always|usual)|the usual)\b", said, re.I):
+            return "workspace", {"action": "start", "name": p["usual"]}
         name = _WORKING_ON.sub("", _LEAD_FILLER.sub("", said))
         name = re.sub(r"^(the|my)\s+", "", name, flags=re.I)
         name = re.sub(r"\s+(today|tonight|now|again|please)$", "", name, flags=re.I).strip()
@@ -259,7 +285,25 @@ def answer_pending(text: str) -> tuple[str, dict] | None:
     items = parse_items(said)
     if not items:
         return None
+    if len(items) == 1 and _is_correction(items[0], p["name"]):
+        return "workspace", {"action": "start", "name": items[0]}
     return "workspace", {"action": "save", "name": p["name"], "items": ", ".join(items)}
+
+
+def _is_correction(answer: str, asked_about: str) -> bool:
+    """"What should I open for Recent project?" -> "Racer.": they meant Racer, it was misheard.
+
+    True when the answer is just the name of a saved workspace or Unity project,
+    and the name we asked about is neither.
+    """
+    saved = load()
+    if asked_about in saved or _unity().match_project(asked_about) == asked_about:
+        return False
+    if answer.lower() in _UNITY_WORDS | _GITHUB_WORDS | _MUSIC_WORDS or answer.lower() in _SITES:
+        return False
+    if saved and best_match(answer, list(saved), cutoff=0.75):
+        return True
+    return bool(_unity().match_project(answer))
 
 
 # --- Tool ------------------------------------------------------------------
@@ -293,6 +337,12 @@ def workspace(
 
     if not name.strip():
         if action == "start":
+            from .. import learning
+            usual = learning.usual_workspace()
+            if usual and usual in saved:
+                _ask("project", "", "")
+                _pending["usual"] = usual
+                return f'Not opened yet. Ask them exactly: "What are we working on, sir? {usual} again?"'
             return _ask("project", "", "What are we working on, sir?")
         return "Error: which workspace?"
 
@@ -301,10 +351,18 @@ def workspace(
     if action == "start":
         ws = saved.get(key)
         if not ws:
-            return _ask("items", key, f"What should I open for {key}?")
+            if _unity().match_project(key) == key:
+                return _ask("items", key, f"What should I open for {key}?")
+            # Not a saved workspace or a Unity project: say so, so a misheard name is obvious.
+            return _ask("items", key, f"I don't have a workspace called {key}. What should I open for it?")
+        if len(_dedupe(ws["items"])) != len(ws["items"]):  # saved before duplicates were caught
+            ws["items"] = _dedupe(ws["items"])
+            _save(saved)
         opened, failed = _open_all(ws["items"])
         if not opened:
             return f"Error: nothing in the {key} workspace would open.{_failures(failed)}"
+        from .. import learning
+        learning.record_workspace(key)
         return f"Opening {key}: {_join([i['label'] for i in opened])}.{_failures(failed)}"
 
     if action == "delete":
@@ -340,16 +398,31 @@ def workspace(
         return f"Removed it. {key} now opens {_join([i['label'] for i in keep]) or 'nothing'}."
 
     # save / add: resolve each item and open it now, which also checks it exists.
-    new = [resolve(p, key) for p in phrases]
+    new = _dedupe([resolve(p, key) for p in phrases])
     existing = saved.get(key, {}).get("items", []) if action == "add" else []
     fresh = [i for i in new if not any(i["type"] == e["type"] and i["target"] == e["target"]
                                        for e in existing)]
     opened, failed = _open_all(fresh)
+    # An "app" that didn't open may be a file or folder: "add my WIL notes to WIL".
+    from . import files
+    still_failed = []
+    for item, error in failed:
+        path = files.locate(item["label"]) if item["type"] == "app" else None
+        if path:
+            as_path = {"type": "path", "target": str(path), "label": item["label"]}
+            if not _open(as_path).startswith("Error"):
+                opened.append(as_path)
+                continue
+        still_failed.append((item, error))
+    failed = still_failed
     if not opened and not existing:
         return f"Error: none of that would open, so I didn't save it.{_failures(failed)}"
 
     saved[key] = {"items": existing + opened, "saved": dt.datetime.now().strftime("%Y-%m-%dT%H:%M")}
     _save(saved)
+    if action == "save":
+        from .. import learning
+        learning.record_workspace(key)
     if action == "add":
         if not opened:
             return f"Error: couldn't add that.{_failures(failed)}"

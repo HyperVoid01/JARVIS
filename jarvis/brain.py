@@ -43,6 +43,7 @@ Rules:
 - If a tool result says it needs the user's OK, ask that question and stop. Only call it again with confirmed=true after the user says yes; if they say no, drop it.
 - Right after a shutdown or restart was started, a bare "cancel" or "stop" means power cancel_shutdown.
 - "Close" an app means window close; "quit", "kill" or "exit" it, or closing something that hides in the tray, means window quit.
+- Files and folders (Downloads, Desktop, a document, a script, a note) use the files tool, not open_app. To answer what a file says, call files read and sum it up briefly; never say you can't access the user's files without trying. "Make a note called X" or "add Y to my X note" is files note, not remember.
 - "Let's get to work", "I'm working on X" or "open my X workspace" means workspace start. To change what a workspace opens, use workspace save, add or remove.
 - When the user asks you to remember, note or not forget something, call remember. If they say a remembered fact changed, call remember with replaces. If they ask you to forget something, call forget. Never say you'll remember or have forgotten something without the tool.
 - Remembered facts are written about the user in the third person. When you talk to them, say "your" and "you", never their name: "Your deadline is Monday", not "Sooriyan's deadline is Monday".
@@ -122,8 +123,13 @@ class Brain:
 
     # --- Conversation --------------------------------------------------
 
-    def ask(self, text: str) -> str:
-        """Handle one user command and return JARVIS's reply."""
+    def ask(self, text: str, prefetch: list[tuple[str, dict]] = ()) -> str:
+        """Handle one user command and return JARVIS's reply.
+
+        `prefetch` is tool calls to run before the model sees the command, when
+        the fast path already knows which tool is needed but the reply needs the
+        model ("what does it say?": read the file, then let the model sum it up).
+        """
         # Forget the conversation after a quiet spell, so old context doesn't confuse new commands.
         if time.time() - self._last_turn > self.history_timeout_s:
             self._history.clear()
@@ -135,10 +141,28 @@ class Brain:
         # Tool calls already run during this command, so the model can't open Discord twice.
         done: dict[str, str] = {}
 
+        for name, args in prefetch:
+            result = tools.call(name, args)
+            done[f"{name}:{json.dumps(args, sort_keys=True)}"] = result
+            print(f"[tool] {name}({_fmt_args(args)}) -> {result.splitlines()[0][:160]}   (prefetched)")
+            self._history.append({"role": "assistant", "content": "",
+                                  "tool_calls": [{"function": {"name": name, "arguments": args}}]})
+            self._history.append({"role": "tool", "content": result, "tool_name": name})
+
         reply = ""
         nudged = False
         for _ in range(self.max_tool_rounds + 1):
             message = self._chat()
+            if _mostly_foreign(message.get("content", "")):
+                # Qwen sometimes answers in Chinese. Stripping it would leave a word salad
+                # ("Sooriyan Emeris Umhlanga 3D C Unity"), so ask again in English instead.
+                print("[brain] reply wasn't in English; asking again")
+                self._history.append({"role": "assistant", "content": message.get("content", "")})
+                self._history.append({"role": "user", "content": _ENGLISH})
+                retry = self._chat()
+                del self._history[-2:]
+                if not _mostly_foreign(retry.get("content", "")):
+                    message = retry
             content = _clean(message.get("content", ""))
             calls = message.get("tool_calls") or []
 
@@ -229,6 +253,13 @@ class Brain:
         self._history.append({"role": "assistant", "content": reply})
         self._trim_history()
 
+    def amend_last_reply(self, reply: str) -> None:
+        """Replace the last stored reply (the responder added a question or reminder to it)."""
+        for m in reversed(self._history):
+            if m["role"] == "assistant" and not m.get("tool_calls"):
+                m["content"] = reply
+                return
+
     def reset(self) -> None:
         self._history.clear()
 
@@ -282,6 +313,21 @@ class Brain:
             self._history = self._history[user_idx[-self.history_turns]:]
 
 
+_ENGLISH = ("(System check, not from the user: your last reply was not in English. Reply again in "
+            "English only, in one or two short sentences.)")
+
+
+def _mostly_foreign(text: str) -> bool:
+    """True if a reply is mostly in a non-Latin script (a few stray glyphs don't count)."""
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 4:
+        return False
+    foreign = sum(1 for c in letters if ord(c) > 0x024F)
+    # One Chinese character is a whole word, so a handful means the reply is in another
+    # language even when it's full of English names. One or two are just a slip.
+    return foreign >= 5 or foreign / len(letters) > 0.2
+
+
 _NUDGE = ("(System check, not from the user: you did not call any tool, so nothing was done. "
           "If the user asked for an action, call the right tool now. If you're not sure what "
           "they meant, ask them briefly. Never say you did something without a tool result.)")
@@ -291,7 +337,8 @@ _NUDGE = ("(System check, not from the user: you did not call any tool, so nothi
 _ACTION_VERBS = (r"set|started|opened|launched|cancel+ed|changed|renamed|restarted|paused|"
                  r"resumed|played|skipped|muted|unmuted|turned|created|closed|searched|stopped|"
                  r"locked|minimi[sz]ed|maximi[sz]ed|switched|quit|killed|decreased|increased|"
-                 r"lowered|raised|adjusted|reduced|remember|noted|saved|stored|forgotten|forgot|deleted|removed|erased")
+                 r"lowered|raised|adjusted|reduced|remember|noted|saved|stored|forgotten|forgot|deleted|removed|erased|"
+                 r"added|updated|wrote|written|appended|inserted|edited|moved|renamed|replaced")
 _STATES = (r"playing|paused|open|closed|locked|minimi[sz]ed|maximi[sz]ed|muted|unmuted|"
            r"running|shutting down|restarting|signing out|going to sleep|set to|at \d+")
 _CLAIM = re.compile(
@@ -302,7 +349,7 @@ _CLAIM = re.compile(
     rf"|\b(shutting down|restarting|locking|signing out)\b"
     rf"|\b(current|volume)\s+(level\s+)?(is\s+)?(at\s+)?\d+\s*(%|percent)"
     rf"|\b(keep that in mind|make a note|made a note|noted that|got it noted|in my memory)\b"
-    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started|closed|switched|noted|saved|forgotten)\b",
+    rf"|^(timer set|all set|done|opened|cancel+ed|paused|playing|muted|started|closed|switched|noted|saved|forgotten|added|updated|removed)\b",
     re.IGNORECASE,
 )
 
@@ -350,6 +397,8 @@ def _clean(text: str) -> str:
     text = re.sub(r"<think>.*?(</think>|$)", "", text, flags=re.DOTALL)
     text = re.sub(r"[*_`#]+", "", text)
     text = re.sub(r"[\U0001F300-\U0001FAFF☀-➿]", "", text)
+    # Replies are English speech: drop stray glyphs from other scripts ("open itꦩ").
+    text = re.sub(r"[^\x00-\u024F\u2000-\u206F\u20A0-\u20CF]", "", text)
     return " ".join(text.split())
 
 

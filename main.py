@@ -192,18 +192,27 @@ def build_speaker(config: Config):
 def build_brain(config: Config, debug: bool):
     from jarvis import tools
     from jarvis.brain import Brain, OllamaError
-    from jarvis.tools import memory, unity, workspaces
+    from jarvis.tools import files, memory, unity, workspaces
 
     unity.configure(project_dirs=config.unity_project_dirs, editor_root=config.unity_editor_root)
     memory_path = Path(config.memory_file)
     memory.configure(memory_path if memory_path.is_absolute() else PROJECT_DIR / memory_path,
                      user=config.user_name)
     workspaces.configure(PROJECT_DIR / "workspaces.json")
+    files.configure(config.file_dirs)
+    files.refresh()  # index the folders in the background so the first search is instant
+    from jarvis import learning
+    learning.configure(PROJECT_DIR / "learning.json", config.user_name,
+                       questions=config.daily_question, reminders=config.deadline_reminders)
+    learning.ensure_about_dir()
+    print("Files: " + ", ".join(f"{name} ({path})" for name, path in files.ROOTS.items()))
 
     def extra_context() -> str:
         projects = ", ".join(sorted(unity.find_projects())) or "none found"
-        return (f"The user's Unity projects: {projects}.\n{workspaces.prompt_line()}\n\n"
-                f"{memory.prompt_block(config.user_name)}")
+        habits = learning.habits_line()
+        return (f"The user's Unity projects: {projects}.\n{workspaces.prompt_line()}\n"
+                + (habits + "\n" if habits else "") +
+                f"\n{memory.prompt_block(config.user_name)}")
 
     brain = Brain(
         model=config.llm_model,
@@ -245,7 +254,7 @@ def build_hud(config: Config):
 
 def make_responder(brain, speaker, fast_path: bool = True, hud=None):
     """Returns a function that handles one command, then prints and speaks the reply."""
-    from jarvis import fastpath, tools
+    from jarvis import fastpath, learning, tools
     from jarvis.brain import OllamaError
 
     from jarvis.hud import NullHud
@@ -263,12 +272,18 @@ def make_responder(brain, speaker, fast_path: bool = True, hud=None):
         else:
             hud.state("thinking")
             try:
-                reply = brain.ask(text)
+                reply = brain.ask(text, prefetch=fastpath.prefetch(text) if fast_path else [])
             except OllamaError as e:
                 print(f"[brain] {e}")
                 reply = "Sorry, I can't reach my language model right now."
             else:
                 print(f"JARVIS: {reply}")
+        # A deadline reminder, an offer to remember something, or today's question.
+        extra = learning.after_reply(text, reply)
+        if extra:
+            reply = f"{reply} {extra}"
+            brain.amend_last_reply(reply)
+            print(f"        + {extra}")
         hud.reply(reply)
         hud.state("idle")  # the HUD switches to "speaking" by itself while the reply plays
         if speaker:
@@ -375,6 +390,10 @@ def main() -> int:
             sounds.play(sounds.ALERT)
 
     tools.set_notifier(notify)
+    if not (args.no_brain or args.no_stt):
+        from jarvis import learning
+        # Say a deadline that's today or tomorrow out loud, if you're around but quiet.
+        learning.start_reminder_thread(notify, busy=lambda: bool(speaker and speaker.speaking))
 
     brain = None if (args.no_brain or args.no_stt) else build_brain(config, args.debug)
     respond = make_responder(brain, speaker, config.fast_path, hud) if brain else None

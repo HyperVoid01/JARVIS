@@ -141,6 +141,10 @@ _MODALS = {"can", "can't", "cannot", "will", "won't", "would", "should", "could"
 _IRREGULAR = {"am": "is", "have": "has", "do": "does", "don't": "doesn't", "go": "goes", "was": "was"}
 
 
+_ADVERBS = ("usually|always|often|never|sometimes|really|also|just|still|normally|mostly|rarely|"
+            "generally|actually|only|even|already|probably|definitely|typically")
+
+
 def _third_person_verb(verb: str) -> str:
     v = verb.lower()
     if v in _IRREGULAR:
@@ -214,7 +218,9 @@ def to_fact(said: str, user: str | None = None) -> str:
     s = re.sub(r"\b(i've)\b", f"{u} has", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(i'll)\b", f"{u} will", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(i'd)\b", f"{u} would", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bI\s+([a-z']+)\b", lambda m: f"{u} {_third_person_verb(m[1])}", s, flags=re.IGNORECASE)
+    # "I usually start" -> "Sooriyan usually starts": conjugate the verb, not the adverb before it.
+    s = re.sub(rf"\bI\s+((?:{_ADVERBS})\s+)?([a-z']+)\b",
+               lambda m: f"{u} {m[1] or ''}{_third_person_verb(m[2])}", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(my|mine)\b", f"{u}'s", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(me|myself)\b", u, s, flags=re.IGNORECASE)
     if s.lower().startswith("to "):

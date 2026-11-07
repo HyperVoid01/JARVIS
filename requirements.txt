@@ -23,3 +23,6 @@ winrt-Windows.Media.Control[all]>=3.2.1; sys_platform == "win32"
 
 # Talks to the local Ollama server (the LLM "brain")
 requests>=2.31
+
+# Reading PDFs aloud ("what's in my Dream Planner?")
+pypdf>=5.0

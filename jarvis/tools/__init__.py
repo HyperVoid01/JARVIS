@@ -92,18 +92,31 @@ def confirmation(key: str, question: str, confirmed: bool) -> str | None:
 
 # --- Registry --------------------------------------------------------------
 
-def tool(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator: register `func` as a tool the LLM can call."""
-    _REGISTRY[func.__name__] = Tool(func.__name__, func, _build_schema(func))
-    return func
+_HIDDEN: set[str] = set()
+
+
+def tool(func: Callable[..., Any] | None = None, *, hidden: bool = False):
+    """Decorator: register `func` as a tool the LLM can call.
+
+    `@tool(hidden=True)` registers it for tools.call (the fast path's prefetch)
+    without offering it to the model: every extra tool makes a small model's
+    choices a little worse.
+    """
+    def register(f: Callable[..., Any]) -> Callable[..., Any]:
+        _REGISTRY[f.__name__] = Tool(f.__name__, f, _build_schema(f))
+        if hidden:
+            _HIDDEN.add(f.__name__)
+        return f
+    return register(func) if func is not None else register
 
 
 def all_tools() -> list[Tool]:
-    return list(_REGISTRY.values())
+    return [t for t in _REGISTRY.values() if t.name not in _HIDDEN]
 
 
 def schemas(names: list[str] | None = None) -> list[dict]:
-    return [t.schema for t in _REGISTRY.values() if names is None or t.name in names]
+    return [t.schema for t in _REGISTRY.values()
+            if (names is None and t.name not in _HIDDEN) or (names is not None and t.name in names)]
 
 
 def call(name: str, arguments: dict | str | None) -> str:
@@ -121,11 +134,7 @@ def call(name: str, arguments: dict | str | None) -> str:
             arguments = json.loads(arguments) if arguments.strip() else {}
         except json.JSONDecodeError:
             return f"Error: could not read the arguments for {name}."
-    arguments = arguments or {}
-
-    # Drop arguments the function doesn't accept (small models sometimes invent extras).
-    params = inspect.signature(t.func).parameters
-    arguments = {k: v for k, v in arguments.items() if k in params}
+    arguments = repair_arguments(name, arguments or {}, inspect.signature(t.func).parameters)
 
     try:
         result = t.func(**arguments)
@@ -135,6 +144,49 @@ def call(name: str, arguments: dict | str | None) -> str:
         traceback.print_exc()
         return f"Error: {name} failed: {e}"
     return result if isinstance(result, str) else json.dumps(result)
+
+
+# Names small models use for the "what" of a call, when the tool calls it something else.
+_ALIASES = {"name": ("app", "file", "path", "folder", "target", "query", "title", "item", "what"),
+            "app": ("name", "application", "program", "window"),
+            "text": ("content", "body", "note", "message", "value")}
+
+
+def repair_arguments(tool_name: str, arguments: dict, params) -> dict:
+    """Fix the broken calls a small model sometimes makes, then drop what the tool doesn't take.
+
+        {"name": "files", "arguments": {"action": "list"}}   -> {"action": "list"}   (call nested in a call)
+        {"action владельц": "open"}                          -> {"action": "open"}   (garbage in a key)
+        files(app="documents")                               -> files(name="documents")
+    """
+    if not isinstance(arguments, dict):
+        return {}
+    inner = arguments.get("arguments") or arguments.get("parameters")
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except json.JSONDecodeError:
+            inner = None
+    if isinstance(inner, dict):
+        arguments = {**{k: v for k, v in arguments.items() if k not in ("arguments", "parameters", "name")
+                        or k in params and k == "name" and v != tool_name}, **inner}
+
+    fixed: dict = {}
+    for key, value in arguments.items():
+        clean = re.sub(r"[^a-z_]", "", str(key).lower().split()[0] if str(key).split() else "")
+        if clean not in params:
+            # "actionвладельц" -> "action": keep the longest parameter name the key starts with
+            starts = [p for p in params if clean.startswith(p)]
+            clean = max(starts, key=len) if starts else clean
+        fixed.setdefault(clean, value)
+
+    for wanted, others in _ALIASES.items():
+        if wanted in params and wanted not in fixed:
+            for other in others:
+                if other in fixed and other not in params:
+                    fixed[wanted] = fixed.pop(other)
+                    break
+    return {k: v for k, v in fixed.items() if k in params}
 
 
 # --- Schema generation -----------------------------------------------------
@@ -193,4 +245,4 @@ def _parse_docstring(doc: str) -> tuple[str, dict[str, str]]:
 
 
 # Importing the modules registers their tools.
-from . import devices, media, memory, system, unity, windows, workspaces  # noqa: E402,F401
+from . import devices, files, media, memory, system, unity, windows, workspaces  # noqa: E402,F401
